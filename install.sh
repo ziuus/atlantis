@@ -1,32 +1,44 @@
 #!/usr/bin/env bash
+# 🔱 Atlantis Turnkey Installer
+# Usage:
+#   curl -sSL https://raw.githubusercontent.com/ziuus/atlantis/master/install.sh | bash
+#   ./install.sh [OPTIONS]
 set -e
 
 PREFIX="${PREFIX:-$HOME/.local}"
 BIN_DIR="$PREFIX/bin"
-CONFIG_DIR="$HOME/.config/liquid-glass"
+CONFIG_DIR="$HOME/.config/atlantis"
 AUTOSTART_DIR="$HOME/.config/autostart"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$REPO_DIR"
+if [ -d "$REPO_DIR/.git" ] || [ -f "$REPO_DIR/Cargo.toml" ]; then
+    cd "$REPO_DIR"
+    LOCAL_BUILD=true
+else
+    LOCAL_BUILD=false
+fi
 
 DRY_RUN=false
 CHECK_ONLY=false
-INSTALL_SYSTEMD=false
+INSTALL_SYSTEMD=true
 INSTALL_AUTOSTART=false
 DO_UNINSTALL=false
+INSTALL_DEPS=false
 
 show_help() {
     cat << EOF
-Liquid Glass & Liquid Shell Turnkey Installer
+🔱 Atlantis — Turnkey Wayland Desktop Environment Installer
 
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --check        Check all required prerequisites and exit 0 without compiling or installing
-  --dry-run      Simulate installation, display planned actions/paths without modifying system
-  --systemd      Install and enable systemd user service (liquid-shell.service)
-  --autostart    Install XDG autostart desktop entry (liquid-shell.desktop)
-  --uninstall    Remove installed binaries, systemd service, and autostart entry
+  --deps         Detect and install system dependencies via package manager
+  --check        Check all required prerequisites and exit without compiling
+  --dry-run      Simulate installation, display planned actions without modifying system
+  --no-systemd   Do not install/enable systemd user service
+  --autostart    Install XDG autostart desktop entry (atlantis.desktop)
+  --uninstall    Remove installed binaries, systemd service, and autostart entries
   -h, --help     Show this help message and exit
 
 Environment Variables:
@@ -34,17 +46,19 @@ Environment Variables:
 EOF
 }
 
-# Parse command line options
 for arg in "$@"; do
     case "$arg" in
+        --deps)
+            INSTALL_DEPS=true
+            ;;
         --check)
             CHECK_ONLY=true
             ;;
         --dry-run)
             DRY_RUN=true
             ;;
-        --systemd)
-            INSTALL_SYSTEMD=true
+        --no-systemd)
+            INSTALL_SYSTEMD=false
             ;;
         --autostart)
             INSTALL_AUTOSTART=true
@@ -65,17 +79,43 @@ for arg in "$@"; do
 done
 
 if [ "$DO_UNINSTALL" = true ]; then
-    echo "==> Uninstalling liquid-shell..."
-    killall -9 liquid-shell 2>/dev/null || true
-    systemctl --user stop liquid-shell.service 2>/dev/null || true
-    systemctl --user disable liquid-shell.service 2>/dev/null || true
-    rm -f "$SYSTEMD_USER_DIR/liquid-shell.service"
-    rm -f "$BIN_DIR/liquid-shell"
-    rm -f "$BIN_DIR/island-ctl"
-    rm -f "$AUTOSTART_DIR/liquid-shell.desktop"
-    echo "==> Removed binaries, systemd service, and autostart entry."
-    echo "==> Config remains at $CONFIG_DIR (remove manually if desired)."
+    echo "==> Uninstalling Atlantis desktop environment..."
+    killall -9 atlantis liquid-shell 2>/dev/null || true
+    systemctl --user stop atlantis.service liquid-shell.service 2>/dev/null || true
+    systemctl --user disable atlantis.service liquid-shell.service 2>/dev/null || true
+    rm -f "$SYSTEMD_USER_DIR/atlantis.service" "$SYSTEMD_USER_DIR/liquid-shell.service"
+    rm -f "$BIN_DIR/atlantis" "$BIN_DIR/liquid-shell"
+    rm -f "$BIN_DIR/atlantis-ctl" "$BIN_DIR/island-ctl"
+    rm -f "$AUTOSTART_DIR/atlantis.desktop" "$AUTOSTART_DIR/liquid-shell.desktop"
+    echo "==> Removed binaries, systemd services, and autostart entries."
+    echo "==> Configurations in $CONFIG_DIR preserved."
     exit 0
+fi
+
+# Detect package manager and install dependencies if requested
+install_dependencies() {
+    echo "==> Detecting system package manager for dependencies..."
+    if command -v pacman &>/dev/null; then
+        echo "==> Installing dependencies via pacman (Arch/Manjaro)..."
+        sudo pacman -S --needed --noconfirm rust wayland wayland-protocols libxkbcommon playerctl wireplumber brightnessctl btop
+    elif command -v dnf &>/dev/null; then
+        echo "==> Installing dependencies via dnf (Fedora)..."
+        sudo dnf install -y rust cargo wayland-devel wayland-protocols-devel libxkbcommon-devel playerctl wireplumber brightnessctl btop
+    elif command -v apt-get &>/dev/null; then
+        echo "==> Installing dependencies via apt (Debian/Ubuntu)..."
+        sudo apt-get update
+        sudo apt-get install -y rustc cargo libwayland-dev wayland-protocols libxkbcommon-dev playerctl wireplumber brightnessctl btop
+    elif command -v xbps-install &>/dev/null; then
+        echo "==> Installing dependencies via xbps (Void)..."
+        sudo xbps-install -Sy rust cargo wayland-devel wayland-protocols libxkbcommon-devel playerctl wireplumber brightnessctl btop
+    else
+        echo "==> Package manager not recognized. Please install manually:"
+        echo "    Rust (cargo), wayland, wayland-protocols, libxkbcommon, playerctl, wireplumber, brightnessctl, btop"
+    fi
+}
+
+if [ "$INSTALL_DEPS" = true ]; then
+    install_dependencies
 fi
 
 # Verify dependencies
@@ -85,10 +125,18 @@ check_prerequisites() {
     if command -v cargo &>/dev/null; then
         echo "  [OK] cargo: $(cargo --version 2>/dev/null || echo 'installed')"
     else
-        echo "  [FAIL] cargo: Rust compiler ('cargo') is required but not found in PATH." >&2
-        echo "         Install Rust via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
+        echo "  [FAIL] cargo: Rust compiler ('cargo') is required." >&2
+        echo "         Install via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
         missing=$((missing + 1))
     fi
+
+    for tool in wpctl playerctl brightnessctl btop; do
+        if command -v "$tool" &>/dev/null; then
+            echo "  [OK] $tool: installed"
+        else
+            echo "  [WARN] $tool: not found in PATH (recommended for full island features)." >&2
+        fi
+    done
 
     if [ $missing -gt 0 ]; then
         return 1
@@ -98,144 +146,113 @@ check_prerequisites() {
 
 if [ "$CHECK_ONLY" = true ]; then
     check_prerequisites
-    echo "==> All prerequisites satisfied."
+    echo "==> All required prerequisites satisfied."
     exit 0
 fi
 
 if [ "$DRY_RUN" = true ]; then
-    echo "==> [DRY-RUN] Simulating Liquid Glass installation..."
+    echo "==> [DRY-RUN] Simulating Atlantis installation..."
     check_prerequisites
     echo "==> [DRY-RUN] Planned installation targets and actions:"
     echo "  Prefix:              $PREFIX"
     echo "  Binary directory:    $BIN_DIR"
-    echo "  Binaries:            $BIN_DIR/liquid-shell"
-    echo "                       $BIN_DIR/island-ctl"
+    echo "  Binaries:            $BIN_DIR/atlantis"
+    echo "                       $BIN_DIR/atlantis-ctl"
+    echo "  Symlinks:            $BIN_DIR/liquid-shell -> atlantis"
+    echo "                       $BIN_DIR/island-ctl -> atlantis-ctl"
     echo "  Config directory:    $CONFIG_DIR"
     echo "  Configuration file:  $CONFIG_DIR/config.json"
     if [ "$INSTALL_SYSTEMD" = true ]; then
-        echo "  Systemd unit:        $SYSTEMD_USER_DIR/liquid-shell.service (planned: enable and start)"
+        echo "  Systemd unit:        $SYSTEMD_USER_DIR/atlantis.service (enable & start)"
     fi
-    if [ "$INSTALL_AUTOSTART" = true ]; then
-        echo "  Desktop entry:       $AUTOSTART_DIR/liquid-shell.desktop (planned: autostart)"
-    fi
-    echo "==> [DRY-RUN] Dry run complete. Zero files were created or modified."
     exit 0
 fi
 
 check_prerequisites
 
-echo "==> Building liquid-shell (release profile)..."
-cargo build --release --bin liquid-shell
+# If not local build, clone into temporary directory
+if [ "$LOCAL_BUILD" = false ]; then
+    BUILD_TEMP="$(mktemp -d)"
+    trap 'rm -rf "$BUILD_TEMP"' EXIT
+    echo "==> Cloning Atlantis from GitHub..."
+    git clone --depth 1 https://github.com/ziuus/atlantis.git "$BUILD_TEMP"
+    cd "$BUILD_TEMP"
+fi
+
+echo "==> Building Atlantis (release profile)..."
+cargo build --release --bin atlantis
 
 echo "==> Installing binaries to $BIN_DIR..."
 mkdir -p "$BIN_DIR"
-install -Dm755 "target/release/liquid-shell" "$BIN_DIR/liquid-shell"
-install -Dm755 "bin/island-ctl" "$BIN_DIR/island-ctl"
+install -Dm755 "target/release/atlantis" "$BIN_DIR/atlantis"
+ln -sf atlantis "$BIN_DIR/liquid-shell"
+
+if [ -f "bin/atlantis-ctl" ]; then
+    install -Dm755 "bin/atlantis-ctl" "$BIN_DIR/atlantis-ctl"
+    ln -sf atlantis-ctl "$BIN_DIR/island-ctl"
+elif [ -f "bin/island-ctl" ]; then
+    install -Dm755 "bin/island-ctl" "$BIN_DIR/atlantis-ctl"
+    ln -sf atlantis-ctl "$BIN_DIR/island-ctl"
+fi
 
 echo "==> Ensuring configuration directory at $CONFIG_DIR..."
 mkdir -p "$CONFIG_DIR"
 if [ ! -f "$CONFIG_DIR/config.json" ]; then
-    cat << 'EOF' > "$CONFIG_DIR/config.json"
-{
-  "theme_mode": 0,
-  "style_mode": 2.0,
-  "blur_radius": 0.0,
-  "animation_speed": 1.0,
-  "clock": {
-    "enabled": true,
-    "style_mode": 2.0,
-    "blur_radius": 0.0,
-    "animation_speed": 1.0
-  },
-  "island": {
-    "edge_style": "floating",
-    "fillet_radius_compact": 10.0,
-    "fillet_radius_expanded": 24.0,
-    "blur_radius": 0.0,
-    "style_mode": 2.0,
-    "hover_to_expand": true,
-    "animation_speed": 1.0,
-    "quick_access": [
-      { "name": "Terminal", "command": "foot", "icon": "terminal" },
-      { "name": "Browser", "command": "brave", "icon": "browser" },
-      { "name": "Editor", "command": "code", "icon": "editor" },
-      { "name": "Files", "command": "thunar", "icon": "files" },
-      { "name": "Music", "command": "spotify", "icon": "music" }
-    ]
-  },
-  "dock": {
-    "enabled": true,
-    "hover_to_expand": true,
-    "style_mode": 2.0,
-    "blur_radius": 0.0,
-    "animation_speed": 1.0,
-    "apps": [
-      { "name": "Terminal", "command": "foot", "icon": "terminal", "class": "foot" },
-      { "name": "Browser", "command": "brave", "icon": "browser", "class": "brave" },
-      { "name": "Editor", "command": "code", "icon": "editor", "class": "code" },
-      { "name": "Files", "command": "thunar", "icon": "folder", "class": "thunar" },
-      { "name": "Music", "command": "spotify", "icon": "music", "class": "spotify" }
-    ]
-  },
-  "todo": {
-    "enabled": true,
-    "style_mode": 2.0,
-    "blur_radius": 0.0,
-    "animation_speed": 1.0
-  }
-}
-EOF
-    echo "==> Created default config at $CONFIG_DIR/config.json"
-else
-    echo "==> Preserved existing config at $CONFIG_DIR/config.json"
+    if [ -f "$HOME/.config/liquid-glass/config.json" ]; then
+        cp "$HOME/.config/liquid-glass/config.json" "$CONFIG_DIR/config.json"
+        echo "==> Migrated existing configuration from ~/.config/liquid-glass/config.json"
+    elif [ -f "config/config.json" ]; then
+        cp "config/config.json" "$CONFIG_DIR/config.json"
+        echo "==> Created default configuration at $CONFIG_DIR/config.json"
+    fi
 fi
 
-# Optional systemd service installation
+# Systemd user service installation
 if [ "$INSTALL_SYSTEMD" = true ]; then
+    echo "==> Installing systemd user service..."
     mkdir -p "$SYSTEMD_USER_DIR"
-    cat << EOF > "$SYSTEMD_USER_DIR/liquid-shell.service"
+    cat << EOF > "$SYSTEMD_USER_DIR/atlantis.service"
 [Unit]
-Description=Liquid Glass UI Shell for Wayland
+Description=🔱 Atlantis — Wayland Desktop Environment Shell
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-ExecStart=$BIN_DIR/liquid-shell
+Type=simple
+ExecStart=$BIN_DIR/atlantis
 Restart=on-failure
 RestartSec=1
+Environment=WAYLAND_DISPLAY=wayland-1
 
 [Install]
 WantedBy=graphical-session.target
 EOF
+    ln -sf atlantis.service "$SYSTEMD_USER_DIR/liquid-shell.service"
     systemctl --user daemon-reload
-    systemctl --user enable --now liquid-shell.service
-    echo "==> Systemd service installed and enabled (liquid-shell.service)"
+    systemctl --user enable --now atlantis.service
+    echo "==> Systemd service installed and active (atlantis.service)"
 fi
 
 # Optional XDG autostart entry
 if [ "$INSTALL_AUTOSTART" = true ]; then
     mkdir -p "$AUTOSTART_DIR"
-    cat << EOF > "$AUTOSTART_DIR/liquid-shell.desktop"
+    cat << EOF > "$AUTOSTART_DIR/atlantis.desktop"
 [Desktop Entry]
 Type=Application
-Name=Liquid Shell
-Comment=Physical optical lensing and glassmorphism UI engine for Wayland
-Exec=$BIN_DIR/liquid-shell
+Name=Atlantis
+Comment=Physical optical lensing desktop environment for Wayland
+Exec=$BIN_DIR/atlantis
 Terminal=false
 Categories=Utility;System;
 EOF
-    echo "==> Autostart entry installed to $AUTOSTART_DIR/liquid-shell.desktop"
+    echo "==> Autostart entry installed to $AUTOSTART_DIR/atlantis.desktop"
 fi
 
 echo ""
-echo "Liquid Glass installation complete!"
-echo "Binary:  $BIN_DIR/liquid-shell"
-echo "CLI:     $BIN_DIR/island-ctl (e.g. 'island-ctl toggle')"
-echo "Config:  $CONFIG_DIR/config.json"
-echo "Control: /tmp/liquid_island.fifo"
+echo "🔱 Atlantis installation complete!"
+echo "   Binary: $BIN_DIR/atlantis (symlinked to liquid-shell)"
+echo "   CLI:    $BIN_DIR/atlantis-ctl (symlinked to island-ctl)"
+echo "   Config: $CONFIG_DIR/config.json"
 echo ""
-echo "To launch now:       liquid-shell &"
-echo "To control:          island-ctl toggle"
-echo "To install systemd:  ./install.sh --systemd"
-echo "To autostart Hyprland: add to ~/.config/hypr/hyprland.conf:"
-echo "  exec-once = liquid-shell"
+echo "Quick Test:"
+echo "   atlantis-ctl toggle"

@@ -3478,10 +3478,12 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
         .name("island-fifo".into())
         .spawn(move || {
             let _ = std::fs::remove_file(FIFO_PATH);
+            let _ = std::fs::remove_file("/tmp/atlantis.fifo");
             unsafe {
                 let c_path = std::ffi::CString::new(FIFO_PATH).unwrap();
                 libc::mkfifo(c_path.as_ptr(), 0o666);
             }
+            let _ = std::os::unix::fs::symlink(FIFO_PATH, "/tmp/atlantis.fifo");
 
             let send_evt = |evt: IslandIpcEvent| {
                 let _ = tx.send(evt);

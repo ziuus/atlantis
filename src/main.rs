@@ -718,7 +718,15 @@ fn main() {
     center_hero.blur_radius = island.blur_radius;
 
     let home = std::env::var("HOME").unwrap_or_default();
-    let conf_path = format!("{}/.config/liquid-glass/config.json", home);
+    let conf_candidates = [
+        format!("{}/.config/atlantis/config.json", home),
+        format!("{}/.config/liquid-glass/config.json", home),
+    ];
+    let conf_path = conf_candidates
+        .iter()
+        .find(|p| std::path::Path::new(p).exists())
+        .cloned()
+        .unwrap_or_else(|| format!("{}/.config/atlantis/config.json", home));
 
     if let Some(cache) = wallpaper_mgr.cached_buffer() {
         let clock_crop = WallpaperManager::get_wallpaper_crop(
