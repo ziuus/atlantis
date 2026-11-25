@@ -2634,7 +2634,7 @@ impl IslandWidget {
 
                     let now = chrono::Local::now();
                     use chrono::Timelike;
-                    let (hour, _is_pm) = now.hour12();
+                    let (_is_pm, hour) = now.hour12();
                     let min = now.minute();
                     let ampm = if now.hour() >= 12 { "PM" } else { "AM" };
                     let hour_str = format!("{}", hour);
