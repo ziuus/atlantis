@@ -159,8 +159,8 @@ impl LauncherWidget {
             open_spring: Spring::with_params(
                 0.0,
                 SpringParams {
-                    stiffness: 240.0,
-                    damping: 20.0,
+                    stiffness: 300.0,
+                    damping: 34.5,
                     mass: 0.9,
                     initial_velocity: 0.0,
                     epsilon: 0.002,
@@ -265,10 +265,12 @@ impl LauncherWidget {
             self.apps = Self::scan_desktop_apps();
         }
         self.refilter();
+        if self.open_spring.value < 0.08 {
+            self.open_spring.value = 0.08;
+        }
         self.open_spring.set_target(1.0);
         if let Some(ls) = &self.layer_surface {
             ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
-            ls.commit();
         }
         self.needs_input_region_update = true;
         self.needs_redraw = true;
@@ -279,7 +281,6 @@ impl LauncherWidget {
         self.open_spring.set_target(0.0);
         if let Some(ls) = &self.layer_surface {
             ls.set_keyboard_interactivity(KeyboardInteractivity::None);
-            ls.commit();
         }
         self.needs_input_region_update = true;
         self.needs_redraw = true;
@@ -296,7 +297,9 @@ impl LauncherWidget {
         }
         self.surface.set_input_region(Some(&region));
         region.destroy();
-        self.surface.commit();
+        if !self.needs_redraw {
+            self.surface.commit();
+        }
     }
 
     pub fn update_physics(&mut self, dt: f32) -> bool {
@@ -941,15 +944,14 @@ impl LauncherWidget {
 
         if let Some(r) = &mut self.renderer {
             r.update_overlay(self.width, self.height, &self.overlay_buffer);
-            let raw_t = self.open_spring.value;
             let motion = (1.0 - t).clamp(0.0, 1.0);
-            let inset_x = (1.0 - raw_t).max(-0.02) * 0.11;
-            let inset_y = (1.0 - raw_t).max(-0.02) * 0.09;
-            let y_slide = motion * 0.07;
-            let w_b = (1.0 - inset_x * 2.0).clamp(0.1, 1.04);
-            let h_b = (1.0 - inset_y * 2.0).clamp(0.1, 1.04);
-            let x_b = (0.5 - w_b * 0.5).clamp(0.0, 0.9);
-            let y_b = (inset_y + y_slide).clamp(0.0, 0.9);
+            let inset_x = motion * 0.08;
+            let inset_y = motion * 0.06;
+            let y_slide = motion * 0.05;
+            let w_b = (1.0 - inset_x * 2.0).clamp(0.2, 1.0);
+            let h_b = (1.0 - inset_y * 2.0).clamp(0.2, 1.0);
+            let x_b = (0.5 - w_b * 0.5).clamp(0.0, 0.8);
+            let y_b = (inset_y + y_slide).clamp(0.0, 0.8);
 
             let card = GlassSurface::new()
                 .material(Material::LiquidGlass)

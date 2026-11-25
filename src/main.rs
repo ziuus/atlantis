@@ -925,8 +925,6 @@ fn main() {
         ) = app.island.check_ipc();
         if toggle_launcher {
             app.launcher.toggle();
-            app.launcher.draw();
-            app.launcher.needs_redraw = false;
         }
         if toggle_todo {
             app.todo.toggle_expand();
