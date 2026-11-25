@@ -24,6 +24,7 @@ use wayland_client::{Dispatch, Proxy, QueueHandle};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 
 const FIFO_PATH: &str = "/tmp/liquid_island.fifo";
+pub const COMPACT_PILL_W: f32 = 250.0;
 
 struct WindowCache {
     last_check: Instant,
@@ -895,6 +896,7 @@ impl IslandWidget {
             blur_radius,
             anim_speed,
             hover_to_expand,
+            auto_hide,
         ) = Self::load_config_values();
         let init_y = dock_mode.dock_y();
 
@@ -908,8 +910,8 @@ impl IslandWidget {
             is_pressed: false,
             is_hovered: false,
 
-            current_w: Tokens::ISLAND_COMPACT_W,
-            target_w: Tokens::ISLAND_COMPACT_W,
+            current_w: COMPACT_PILL_W,
+            target_w: COMPACT_PILL_W,
             vel_w: 0.0,
 
             current_h: Tokens::ISLAND_COMPACT_H,
@@ -987,7 +989,7 @@ impl IslandWidget {
             blur_radius,
             anim_speed,
             hover_to_expand,
-            auto_hide: false,
+            auto_hide,
             hover_dwell_start: None,
             hot_edge_dwell_start: None,
             needs_input_region_update: true,
@@ -1048,7 +1050,7 @@ impl IslandWidget {
             } else {
                 match self.mode {
                     IslandMode::CompactPill => {
-                        let pill_w = Tokens::ISLAND_COMPACT_W as i32;
+                        let pill_w = COMPACT_PILL_W as i32;
                         let pill_h = (self.target_y + Tokens::ISLAND_COMPACT_H) as i32;
                         let pill_x = (self.width as i32 - pill_w) / 2;
                         region.add(pill_x, 0, pill_w, pill_h);
@@ -1386,7 +1388,7 @@ impl IslandWidget {
                 self.target_alpha = 0.0;
             }
             IslandMode::CompactPill => {
-                self.target_w = Tokens::ISLAND_COMPACT_W;
+                self.target_w = COMPACT_PILL_W;
                 self.target_h = Tokens::ISLAND_COMPACT_H;
                 self.target_y = dock_y;
                 self.target_alpha = 1.0;
@@ -1457,9 +1459,19 @@ impl IslandWidget {
         f32,
         f32,
         bool,
+        bool,
     ) {
         let home = std::env::var("HOME").unwrap_or_default();
-        let conf_path = format!("{}/.config/liquid-glass/config.json", home);
+        let conf_candidates = [
+            format!("{}/.config/atlantis/config.json", home),
+            format!("{}/.config/liquid-glass/config.json", home),
+        ];
+        let conf_path = conf_candidates
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .cloned()
+            .unwrap_or_else(|| format!("{}/.config/atlantis/config.json", home));
+
         if let Ok(content) = std::fs::read_to_string(&conf_path) {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
                 let island_val = val.get("island");
@@ -1527,6 +1539,11 @@ impl IslandWidget {
                     .or_else(|| val.get("hover_to_expand"))
                     .and_then(|h| h.as_bool())
                     .unwrap_or(true);
+                let auto_hide = island_val
+                    .and_then(|i| i.get("auto_hide"))
+                    .or_else(|| val.get("auto_hide"))
+                    .and_then(|h| h.as_bool())
+                    .unwrap_or(true);
                 return (
                     dock_mode,
                     fillet_compact,
@@ -1537,6 +1554,7 @@ impl IslandWidget {
                     blur_radius,
                     anim_speed,
                     hover_to_expand,
+                    auto_hide,
                 );
             }
         }
@@ -1555,6 +1573,7 @@ impl IslandWidget {
             0,
             0.0,
             1.0,
+            true,
             true,
         )
     }
@@ -1663,7 +1682,8 @@ impl IslandWidget {
     }
 
     pub fn reload_config(&mut self) {
-        let (mode, r_c, r_e, apps, style, theme, blur, speed, hover) = Self::load_config_values();
+        let (mode, r_c, r_e, apps, style, theme, blur, speed, hover, auto_hide) =
+            Self::load_config_values();
         self.fillet_radius_compact = r_c;
         self.fillet_radius_expanded = r_e;
         self.quick_access = apps;
@@ -1672,6 +1692,7 @@ impl IslandWidget {
         self.blur_radius = blur;
         self.anim_speed = speed;
         self.hover_to_expand = hover;
+        self.auto_hide = auto_hide;
         self.set_dock_mode(mode);
     }
 
@@ -1998,7 +2019,7 @@ impl IslandWidget {
             } else {
                 self.hud = None;
                 self.target_w = match self.mode {
-                    IslandMode::CompactPill => Tokens::ISLAND_COMPACT_W,
+                    IslandMode::CompactPill => COMPACT_PILL_W,
                     IslandMode::Notification => 420.0,
                     IslandMode::Hidden => 160.0,
                     _ => Tokens::ISLAND_EXPANDED_W,
@@ -2270,11 +2291,16 @@ impl IslandWidget {
                     self.last_interaction = Instant::now();
                     self.hot_edge_dwell_start = None;
                 } else if self.mode != IslandMode::Hidden
-                    && self.last_interaction.elapsed() >= Duration::from_millis(3000)
+                    && self.last_interaction.elapsed() >= Duration::from_millis(1500)
                 {
                     self.hot_edge_dwell_start = None;
                     self.set_mode(IslandMode::Hidden);
                 }
+            } else if self.mode != IslandMode::Hidden
+                && self.last_interaction.elapsed() >= Duration::from_millis(1500)
+            {
+                self.hot_edge_dwell_start = None;
+                self.set_mode(IslandMode::Hidden);
             }
         }
     }
@@ -2593,67 +2619,84 @@ impl IslandWidget {
                     }
                 } else {
                     // ── Idle / Paused Mode (Dynamic Status Island) ──
-                    // Left: Clean Clock Lucide Icon
+                    // Left: Clean Clock Lucide Icon + Time
+                    let clock_icon_x = island_cx - island_w * 0.5 + 20.0;
                     UIFont::draw_clock_icon(
                         buf,
                         self.width,
                         self.height,
-                        disc_cx,
+                        clock_icon_x,
                         island_cy,
                         col_ink,
                     );
 
-                    // Center: High-legibility Digital Clock
                     let now = chrono::Local::now();
                     let time_str = now.format("%I:%M %p").to_string();
-                    self.font.draw_text_centered(
+                    self.font.draw_text(
                         buf,
                         self.width,
                         self.height,
                         &time_str,
-                        island_cx,
-                        island_cy,
+                        clock_icon_x + 13.0,
+                        island_cy - 6.0,
                         Tokens::TYPE_BODY_SM,
                         col_ink,
-                        col_shadow,
                         FontWeight::Bold,
                     );
 
-                    // Right: [Volume Speaker] [Network status dot] [Live Battery Indicator]
-                    let dot_x = right_x - 18.0;
-                    let spk_x = dot_x - 18.0;
+                    // Center-Right: Volume badge [Speaker Icon] [Percentage]
+                    let spk_icon_x = island_cx + 12.0;
                     Self::draw_speaker_icon(
                         buf,
                         self.width,
                         self.height,
-                        spk_x,
+                        spk_icon_x,
                         island_cy,
                         col_ink,
                         !self.sys_stats.vol_muted,
                     );
-
-                    let net_col = if self.sys_stats.is_online {
-                        [52, 199, 89, 230] // Emerald Green online dot
+                    let vol_str = if self.sys_stats.vol_muted {
+                        "Mute".to_string()
                     } else {
-                        [255, 159, 10, 230] // Amber offline dot
+                        format!("{}%", self.sys_stats.vol_pct)
                     };
-                    UIFont::draw_rounded_rect_fill(
+                    self.font.draw_text(
                         buf,
                         self.width,
                         self.height,
-                        dot_x,
-                        island_cy,
-                        2.5,
-                        2.5,
-                        2.5,
-                        net_col,
+                        &vol_str,
+                        spk_icon_x + 12.0,
+                        island_cy - 6.0,
+                        Tokens::TYPE_BODY_SM,
+                        if self.sys_stats.vol_muted { col_dim } else { col_ink },
+                        FontWeight::SemiBold,
+                    );
+
+                    // Far-Right: Battery badge [Percentage] [Battery Icon]
+                    let bat_pct_str = if self.sys_stats.bat_charging {
+                        format!("⚡{}%", self.sys_stats.bat_pct)
+                    } else {
+                        format!("{}%", self.sys_stats.bat_pct)
+                    };
+                    let bat_icon_x = island_cx + island_w * 0.5 - 20.0;
+                    let bat_text_x = bat_icon_x - 38.0;
+                    self.font.draw_text(
+                        buf,
+                        self.width,
+                        self.height,
+                        &bat_pct_str,
+                        bat_text_x,
+                        island_cy - 6.0,
+                        Tokens::TYPE_BODY_SM,
+                        col_ink,
+                        FontWeight::SemiBold,
                     );
 
                     UIFont::draw_battery_icon(
                         buf,
                         self.width,
                         self.height,
-                        right_x,
+                        bat_icon_x,
                         island_cy,
                         self.sys_stats.bat_pct,
                         self.sys_stats.bat_charging,
