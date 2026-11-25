@@ -1,6 +1,22 @@
+<div align="center">
+
 # 🔱 Atlantis
 
-> **Turnkey physical optical glass desktop environment and layer-shell rice for Wayland** (Hyprland, Sway, River, Wayfire, Labwc, Niri), powered by the [Liquid Glass Physical Rendering Engine](https://github.com/ziuus/liquid-glass).
+### Turnkey Physical Optical Glass Desktop Environment for Wayland
+
+[![Wayland](https://img.shields.io/badge/Wayland-Layer--Shell-2B3A42?style=flat-square&logo=linux)](https://wayland.freedesktop.org)
+[![Engine](https://img.shields.io/badge/Engine-Liquid--Glass-blue?style=flat-square)](https://github.com/ziuus/liquid-glass)
+[![License](https://img.shields.io/badge/License-MIT-black?style=flat-square)](LICENSE)
+
+<br />
+
+<img src="assets/hero.png" alt="Atlantis Liquid Glass Desktop Environment" width="100%" />
+
+*Complete physical optical glass desktop suite with Snell refraction, Cauchy chromatic dispersion, tactile spring kinetics, and dynamic ambient lighting.*
+
+<br />
+
+</div>
 
 ---
 
@@ -29,9 +45,15 @@
 
 ---
 
-## 🚀 Installation
+## 🚀 Turnkey Installation
 
-### Automated Turnkey Installer
+### One-Line Automated Installer
+
+```bash
+curl -sSL https://raw.githubusercontent.com/ziuus/atlantis/master/install.sh | bash
+```
+
+### From Source
 
 ```bash
 git clone https://github.com/ziuus/atlantis.git
@@ -39,35 +61,33 @@ cd atlantis
 ./install.sh --systemd
 ```
 
-### Options
+### Arch Linux (PKGBUILD)
 
 ```bash
-./install.sh --check      # Verify dependencies without installing
-./install.sh --systemd    # Install binary and enable systemd user service
-./install.sh --autostart  # Install XDG desktop autostart entry
-./install.sh --uninstall  # Clean removal
+cd atlantis
+makepkg -si
 ```
 
 ---
 
-## 🎮 CLI Control (`island-ctl`)
+## 🎮 CLI Control (`atlantis-ctl`)
 
-Control the island from your keyboard shortcuts, Hyprland binds, or terminal:
+Control the desktop from your keyboard shortcuts, Hyprland binds, or terminal:
 
 ```bash
-island-ctl --toggle           # Toggle expand / collapse
-island-ctl --menu music       # Jump directly to Music player
-island-ctl --menu system      # Jump to System Overview
-island-ctl --menu apps        # Jump to Quick Access app drawer
-island-ctl --menu power       # Jump to Power menu
-island-ctl --cycle-theme      # Cycle Auto -> Dark -> Light
-island-ctl --cycle-style      # Cycle Obsidian -> Frosted -> Liquid Glass
+atlantis-ctl toggle           # Toggle island visibility
+atlantis-ctl music            # Jump directly to Music player
+atlantis-ctl system           # Jump to System Overview
+atlantis-ctl apps             # Jump to Quick Access app drawer
+atlantis-ctl power            # Jump to Power menu
+atlantis-ctl theme cycle      # Cycle Auto -> Dark -> Light
+atlantis-ctl style cycle      # Cycle Obsidian -> Frosted -> Liquid Glass
 ```
 
 ---
 
 ## ⚙️ Core Engine
 
-Atlantis is built on the **Liquid Glass Engine**:
+Atlantis is built on the **Liquid Glass Physical Rendering Engine**:
 - **Repository**: [https://github.com/ziuus/liquid-glass](https://github.com/ziuus/liquid-glass)
 - Pure Rust, headless WGPU + WGSL physical optical rendering pipeline with RK4 spring physics.
