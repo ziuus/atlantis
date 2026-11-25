@@ -746,23 +746,117 @@ impl IslandWidget {
         col: [u8; 4],
         has_sound: bool,
     ) {
-        UIFont::draw_rounded_rect_fill(buf, width, height, cx - 4.0, cy, 2.0, 3.0, 1.0, col);
-        UIFont::draw_rounded_rect_fill(buf, width, height, cx - 1.0, cy, 1.0, 4.5, 0.5, col);
-        UIFont::draw_rounded_rect_fill(buf, width, height, cx + 1.0, cy, 1.0, 6.0, 0.5, col);
+        let s = 1.3f32;
+        UIFont::draw_segment(
+            buf,
+            width,
+            height,
+            (cx - 5.5, cy - 2.2),
+            (cx - 2.8, cy - 2.2),
+            s,
+            col,
+        );
+        UIFont::draw_segment(
+            buf,
+            width,
+            height,
+            (cx - 5.5, cy + 2.2),
+            (cx - 2.8, cy + 2.2),
+            s,
+            col,
+        );
+        UIFont::draw_segment(
+            buf,
+            width,
+            height,
+            (cx - 5.5, cy - 2.2),
+            (cx - 5.5, cy + 2.2),
+            s,
+            col,
+        );
+        UIFont::draw_segment(
+            buf,
+            width,
+            height,
+            (cx - 2.8, cy - 2.2),
+            (cx + 0.8, cy - 5.0),
+            s,
+            col,
+        );
+        UIFont::draw_segment(
+            buf,
+            width,
+            height,
+            (cx - 2.8, cy + 2.2),
+            (cx + 0.8, cy + 5.0),
+            s,
+            col,
+        );
+        UIFont::draw_segment(
+            buf,
+            width,
+            height,
+            (cx + 0.8, cy - 5.0),
+            (cx + 0.8, cy + 5.0),
+            s,
+            col,
+        );
         if has_sound {
-            UIFont::draw_rounded_rect_fill(buf, width, height, cx + 4.5, cy, 0.8, 3.5, 0.5, col);
-            UIFont::draw_rounded_rect_fill(buf, width, height, cx + 7.5, cy, 0.8, 6.0, 0.5, col);
-        } else {
-            UIFont::draw_rounded_rect_fill(
+            UIFont::draw_segment(
                 buf,
                 width,
                 height,
-                cx + 5.0,
-                cy,
-                0.8,
-                4.0,
-                0.5,
-                [255, 69, 58, 255],
+                (cx + 3.4, cy - 2.6),
+                (cx + 4.3, cy),
+                s,
+                col,
+            );
+            UIFont::draw_segment(
+                buf,
+                width,
+                height,
+                (cx + 4.3, cy),
+                (cx + 3.4, cy + 2.6),
+                s,
+                col,
+            );
+            UIFont::draw_segment(
+                buf,
+                width,
+                height,
+                (cx + 5.8, cy - 4.4),
+                (cx + 7.1, cy),
+                s,
+                col,
+            );
+            UIFont::draw_segment(
+                buf,
+                width,
+                height,
+                (cx + 7.1, cy),
+                (cx + 5.8, cy + 4.4),
+                s,
+                col,
+            );
+        } else {
+            let dim = [col[0], col[1], col[2], (col[3] as f32 * 0.7) as u8];
+            UIFont::draw_segment(
+                buf,
+                width,
+                height,
+                (cx + 3.5, cy - 2.5),
+                (cx + 7.5, cy + 2.5),
+                s,
+                dim,
+            );
+            UIFont::draw_segment(
+                buf,
+                width,
+                height,
+                (cx + 7.5, cy - 2.5),
+                (cx + 3.5, cy + 2.5),
+                s,
+                dim,
             );
         }
     }
@@ -775,11 +869,22 @@ impl IslandWidget {
         cy: f32,
         col: [u8; 4],
     ) {
-        UIFont::draw_rounded_rect_fill(buf, width, height, cx, cy, 4.0, 4.0, 4.0, col);
-        UIFont::draw_rounded_rect_fill(buf, width, height, cx, cy - 7.0, 1.0, 1.5, 0.5, col);
-        UIFont::draw_rounded_rect_fill(buf, width, height, cx, cy + 7.0, 1.0, 1.5, 0.5, col);
-        UIFont::draw_rounded_rect_fill(buf, width, height, cx - 7.0, cy, 1.5, 1.0, 0.5, col);
-        UIFont::draw_rounded_rect_fill(buf, width, height, cx + 7.0, cy, 1.5, 1.0, 0.5, col);
+        UIFont::draw_rounded_rect_stroke(buf, width, height, cx, cy, 3.2, 3.2, 3.2, 1.3, col);
+        let r0 = 5.4f32;
+        let r1 = 7.2f32;
+        for i in 0..8 {
+            let a = (i as f32) * std::f32::consts::FRAC_PI_4;
+            let (sin_a, cos_a) = a.sin_cos();
+            UIFont::draw_segment(
+                buf,
+                width,
+                height,
+                (cx + cos_a * r0, cy + sin_a * r0),
+                (cx + cos_a * r1, cy + sin_a * r1),
+                1.2,
+                col,
+            );
+        }
     }
 
     pub fn render_hud_overlay(
@@ -3346,57 +3451,50 @@ impl IslandWidget {
                 }
             }
             IslandMode::ControlCenter => {
-                // Header
                 self.font.draw_text(
                     buf,
                     self.width,
                     self.height,
-                    "CONTROL CENTER",
+                    "CONTROL",
                     cx - island_w * 0.5 + 32.0,
                     island_top + 24.0,
-                    Tokens::TYPE_CAPTION,
+                    Tokens::TYPE_CAPTION - 0.5,
                     col_dim,
-                    FontWeight::Bold,
+                    FontWeight::SemiBold,
                 );
 
                 let cur_lx = self.cursor_pos[0] * (self.width as f32);
                 let cur_ly = self.cursor_pos[1] * (self.height as f32);
 
-                // Row 1: 4 Interactive Quick Toggles (Wi-Fi, Bluetooth, Output, Mute)
                 let toggles = [
-                    ("Wi-Fi", self.sys_stats.wifi_enabled, [52u8, 199, 89, 210]),
-                    (
-                        "Bluetooth",
-                        self.sys_stats.bt_enabled,
-                        [10u8, 132, 255, 220],
-                    ),
-                    ("Audio Out", false, [160u8, 175, 200, 180]),
+                    ("Wi-Fi", self.sys_stats.wifi_enabled),
+                    ("Bluetooth", self.sys_stats.bt_enabled),
+                    ("Output", false),
                     (
                         if self.sys_stats.vol_muted {
                             "Muted"
                         } else {
                             "Sound"
                         },
-                        self.sys_stats.vol_muted,
-                        [255u8, 149, 10, 220],
+                        !self.sys_stats.vol_muted,
                     ),
                 ];
-                let tog_w = (island_w - 52.0) / 4.0;
-                let tog_start_x = cx - island_w * 0.5 + 26.0 + tog_w * 0.5;
+                let tog_w = (island_w - 56.0) / 4.0;
+                let tog_start_x = cx - island_w * 0.5 + 28.0 + tog_w * 0.5;
                 let tog_y = island_top + 56.0;
 
-                for (idx, (label, is_on, accent)) in toggles.iter().enumerate() {
+                for (idx, (label, is_on)) in toggles.iter().enumerate() {
                     let tx = tog_start_x + (idx as f32) * tog_w;
+                    let half_w = (tog_w - 8.0) * 0.5;
                     let hovered = self.is_hovered
-                        && (cur_lx - tx).abs() <= (tog_w - 8.0) * 0.5
-                        && (cur_ly - tog_y).abs() <= 14.0;
+                        && (cur_lx - tx).abs() <= half_w
+                        && (cur_ly - tog_y).abs() <= 13.0;
                     let bg = if *is_on {
-                        [
-                            accent[0],
-                            accent[1],
-                            accent[2],
-                            if hovered { 75 } else { 52 },
-                        ]
+                        if is_light {
+                            [0, 0, 0, if hovered { 38 } else { 26 }]
+                        } else {
+                            [255, 255, 255, if hovered { 54 } else { 38 }]
+                        }
                     } else if hovered {
                         if is_light {
                             Tokens::INNER_TILE_BG_HOVER_LIGHT
@@ -3404,9 +3502,9 @@ impl IslandWidget {
                             Tokens::INNER_TILE_BG_HOVER_DARK
                         }
                     } else if is_light {
-                        Tokens::INNER_TILE_BG_LIGHT
+                        [0, 0, 0, 10]
                     } else {
-                        Tokens::INNER_TILE_BG_DARK
+                        [255, 255, 255, 14]
                     };
                     UIFont::draw_rounded_rect_fill(
                         buf,
@@ -3414,44 +3512,51 @@ impl IslandWidget {
                         self.height,
                         tx,
                         tog_y,
-                        (tog_w - 8.0) * 0.5,
-                        14.0,
-                        10.0,
+                        half_w,
+                        13.0,
+                        13.0,
                         bg,
                     );
-                    let dot_c = if *is_on {
-                        *accent
+                    if *is_on {
+                        let rim = if is_light {
+                            [0, 0, 0, 40]
+                        } else {
+                            [255, 255, 255, 55]
+                        };
+                        UIFont::draw_rounded_rect_stroke(
+                            buf,
+                            self.width,
+                            self.height,
+                            tx,
+                            tog_y,
+                            half_w,
+                            13.0,
+                            13.0,
+                            0.9,
+                            rim,
+                        );
+                    }
+                    let txt_col = if *is_on {
+                        col_ink
                     } else if is_light {
-                        [0, 0, 0, 50]
+                        [18, 24, 34, 155]
                     } else {
-                        [255, 255, 255, 65]
+                        [235, 240, 252, 155]
                     };
-                    UIFont::draw_rounded_rect_fill(
-                        buf,
-                        self.width,
-                        self.height,
-                        tx - (tog_w - 8.0) * 0.5 + 11.0,
-                        tog_y,
-                        2.5,
-                        2.5,
-                        2.5,
-                        dot_c,
-                    );
                     self.font.draw_text_centered(
                         buf,
                         self.width,
                         self.height,
                         label,
-                        tx + 5.0,
+                        tx,
                         tog_y,
                         Tokens::TYPE_CAPTION,
-                        col_ink,
+                        txt_col,
                         col_shadow,
-                        FontWeight::SemiBold,
+                        FontWeight::Medium,
                     );
                 }
 
-                // Row 2 & 3: Interactive Volume & Brightness Sliders
                 let slider_left = cx - island_w * 0.5 + 54.0;
                 let slider_right = cx + island_w * 0.5 - 66.0;
                 let slider_w = (slider_right - slider_left).max(80.0);
@@ -3496,9 +3601,9 @@ impl IslandWidget {
                     }
 
                     let track_bg = if is_light {
-                        [0, 0, 0, 26]
+                        [0, 0, 0, 28]
                     } else {
-                        [255, 255, 255, 28]
+                        [255, 255, 255, 34]
                     };
                     UIFont::draw_rounded_rect_fill(
                         buf,
@@ -3507,20 +3612,18 @@ impl IslandWidget {
                         slider_cx,
                         sy,
                         slider_w * 0.5,
-                        5.0,
-                        5.0,
+                        2.0,
+                        2.0,
                         track_bg,
                     );
 
-                    let clamped = ratio.clamp(0.04, 1.0);
-                    let fill_w = slider_w * clamped;
+                    let clamped = ratio.clamp(0.0, 1.0);
+                    let fill_w = (slider_w * clamped).max(4.0);
                     let fill_cx = slider_left + fill_w * 0.5;
-                    let fill_col = if is_vol && self.sys_stats.vol_muted {
-                        [255, 149, 10, 220]
-                    } else if is_light {
-                        [24, 30, 42, 235]
+                    let fill_col = if is_light {
+                        [24, 30, 42, 220]
                     } else {
-                        [245, 248, 255, 240]
+                        [255, 255, 255, 225]
                     };
                     UIFont::draw_rounded_rect_fill(
                         buf,
@@ -3529,8 +3632,20 @@ impl IslandWidget {
                         fill_cx,
                         sy,
                         fill_w * 0.5,
-                        5.0,
-                        5.0,
+                        2.0,
+                        2.0,
+                        fill_col,
+                    );
+                    let knob_x = slider_left + slider_w * clamped;
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        knob_x,
+                        sy,
+                        5.2,
+                        5.2,
+                        5.2,
                         fill_col,
                     );
 
@@ -3544,7 +3659,7 @@ impl IslandWidget {
                         Tokens::TYPE_CAPTION,
                         col_dim,
                         col_shadow,
-                        FontWeight::SemiBold,
+                        FontWeight::Medium,
                     );
                 }
             }
@@ -3709,11 +3824,11 @@ impl IslandWidget {
                         FontWeight::Medium,
                     );
 
-                    // Mini progress bar at bottom of card (Tide-Island System Glance style)
-                    let bar_w = item_w - 24.0;
+                    // Minimal hairline progress bar
+                    let bar_w = item_w - 26.0;
                     let bar_y = cy + 25.5;
                     let track_c = if is_light {
-                        [0, 0, 0, 28]
+                        [0, 0, 0, 24]
                     } else {
                         [255, 255, 255, 28]
                     };
@@ -3724,12 +3839,20 @@ impl IslandWidget {
                         cx,
                         bar_y,
                         bar_w * 0.5,
-                        1.5,
-                        1.5,
+                        1.0,
+                        1.0,
                         track_c,
                     );
                     let fill_w = (bar_w * ratio.clamp(0.06, 1.0)).max(3.0);
                     let fill_cx = (cx - bar_w * 0.5) + fill_w * 0.5;
+                    let mono_bar =
+                        if *accent == Tokens::STATUS_RED || *accent == Tokens::STATUS_AMBER {
+                            *accent
+                        } else if is_light {
+                            [18, 24, 34, 210]
+                        } else {
+                            [245, 248, 255, 210]
+                        };
                     UIFont::draw_rounded_rect_fill(
                         buf,
                         self.width,
@@ -3737,9 +3860,9 @@ impl IslandWidget {
                         fill_cx,
                         bar_y,
                         fill_w * 0.5,
-                        1.5,
-                        1.5,
-                        *accent,
+                        1.0,
+                        1.0,
+                        mono_bar,
                     );
                 }
             }
