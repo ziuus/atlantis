@@ -677,19 +677,7 @@ pub struct IslandWidget {
 
 impl IslandWidget {
     pub fn focus_or_launch_app(app: &str) {
-        let clean: String = app
-            .chars()
-            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
-            .collect();
-        let target = clean.trim();
-        if target.is_empty() {
-            return;
-        }
-        let script = format!(
-            "hyprctl dispatch focuswindow 'class:(?i){t}' || hyprctl dispatch focuswindow 'title:(?i){t}'",
-            t = target
-        );
-        let _ = Command::new("sh").args(["-c", &script]).spawn();
+        crate::compositor::focus_window(app);
     }
 
     pub fn copy_notification(n: &NotificationData) {

@@ -727,7 +727,7 @@ impl LauncherWidget {
             },
             DesktopApp {
                 name: "Lock Screen".into(),
-                exec: "hyprlock".into(),
+                exec: "command -v hyprlock >/dev/null && hyprlock || command -v swaylock >/dev/null && swaylock || loginctl lock-session".into(),
                 comment: "Lock current Wayland session".into(),
                 icon: "system-lock-screen".into(),
                 is_action: true,

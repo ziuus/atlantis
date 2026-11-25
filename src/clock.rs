@@ -1026,9 +1026,7 @@ impl ClockWidget {
                             ClockBoxKind::SystemTools => {
                                 if (py - (tcy - 4.0)).abs() <= 16.0 {
                                     if px < tcx {
-                                        let _ = Command::new("sh")
-                                            .args(["-c", "grim ~/Pictures/shot_$(date +%s).png"])
-                                            .spawn();
+                                        crate::compositor::take_screenshot();
                                     } else {
                                         let _ = Command::new("sh")
                                             .args(["-c", "echo launcher > /tmp/liquid_island.fifo"])
@@ -1065,9 +1063,7 @@ impl ClockWidget {
                             return true;
                         }
                         2 => {
-                            let _ = Command::new("/home/zius/.local/bin/hyprlock")
-                                .spawn()
-                                .or_else(|_| Command::new("hyprlock").spawn());
+                            crate::compositor::lock_screen();
                             self.collapse();
                             return true;
                         }

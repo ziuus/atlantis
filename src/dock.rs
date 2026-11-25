@@ -698,45 +698,18 @@ impl DockWidget {
         }
         self.last_client_poll = Instant::now();
 
-        // Query active windows from Hyprland via hyprctl
-        if let Ok(output) = Command::new("hyprctl").arg("clients").arg("-j").output() {
-            if output.status.success() {
-                if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-                    if let Some(list) = val.as_array() {
-                        let mut active_classes = Vec::new();
-                        for item in list {
-                            if let Some(c) = item.get("class").and_then(|v| v.as_str()) {
-                                active_classes.push(c.to_lowercase());
-                            }
-                        }
-
-                        // Query active window for focus highlight
-                        let focused_class = Command::new("hyprctl")
-                            .arg("activewindow")
-                            .arg("-j")
-                            .output()
-                            .ok()
-                            .and_then(|out| {
-                                serde_json::from_slice::<serde_json::Value>(&out.stdout).ok()
-                            })
-                            .and_then(|val| {
-                                val.get("class")
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| s.to_lowercase())
-                            });
-
-                        for item in &mut self.items {
-                            let pat = item.class.to_lowercase();
-                            item.is_running =
-                                !pat.is_empty() && active_classes.iter().any(|c| c.contains(&pat));
-                            item.is_focused = !pat.is_empty()
-                                && focused_class
-                                    .as_ref()
-                                    .map(|f| f.contains(&pat))
-                                    .unwrap_or(false);
-                        }
-                    }
-                }
+        // Query active windows from running Wayland compositor (Hyprland / Sway / Niri)
+        let (active_classes, focused_class) = crate::compositor::running_app_classes();
+        if !active_classes.is_empty() || focused_class.is_some() {
+            for item in &mut self.items {
+                let pat = item.class.to_lowercase();
+                item.is_running =
+                    !pat.is_empty() && active_classes.iter().any(|c| c.contains(&pat));
+                item.is_focused = !pat.is_empty()
+                    && focused_class
+                        .as_ref()
+                        .map(|f| f.contains(&pat))
+                        .unwrap_or(false);
             }
         }
     }

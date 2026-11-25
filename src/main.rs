@@ -23,6 +23,7 @@ use wayland_client::{Connection, Proxy, QueueHandle};
 
 mod center_clock;
 mod clock;
+mod compositor;
 mod dock;
 mod island;
 mod launcher;
