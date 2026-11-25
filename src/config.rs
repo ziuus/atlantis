@@ -5,6 +5,32 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Clock numeral color theme — overrides the wallpaper-adaptive default.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ClockTheme {
+    /// Wallpaper-adaptive: white on dark, dark on light (default)
+    #[default]
+    Auto,
+    /// Force pure white numerals with glow halo
+    White,
+    /// Force near-black numerals with soft drop-shadow
+    Black,
+    /// Semi-transparent frosted-glass numerals (glass pill only, no fill)
+    LiquidGlass,
+}
+
+impl ClockTheme {
+    pub fn parse_str(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "white" | "light" => Self::White,
+            "black" | "dark" => Self::Black,
+            "liquid_glass" | "liquid" | "glass" | "frosted" => Self::LiquidGlass,
+            _ => Self::Auto,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ContrastPreset {
@@ -65,6 +91,9 @@ pub struct CenterHeroConfig {
     pub use_24h_format: bool,
     #[serde(default = "default_date_format")]
     pub date_format: String,
+    /// Numeral color theme: auto | white | black | liquid_glass
+    #[serde(default)]
+    pub clock_theme: ClockTheme,
 }
 
 fn default_true() -> bool {
@@ -116,6 +145,7 @@ impl Default for CenterHeroConfig {
             blur_radius: default_blur_radius(),
             use_24h_format: false,
             date_format: default_date_format(),
+            clock_theme: ClockTheme::Auto,
         }
     }
 }

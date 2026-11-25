@@ -876,8 +876,15 @@ fn main() {
             }
         }
 
-        let (new_style, new_theme, new_blur, toggle_todo, toggle_clock, toggle_dock) =
-            app.island.check_ipc();
+        let (
+            new_style,
+            new_theme,
+            new_blur,
+            toggle_todo,
+            toggle_clock,
+            toggle_dock,
+            new_clock_theme,
+        ) = app.island.check_ipc();
         if toggle_todo {
             app.todo.toggle_expand();
             app.todo.draw();
@@ -917,6 +924,12 @@ fn main() {
             app.todo.draw();
             app.dock.draw();
             app.island.draw();
+        }
+        if let Some(ct) = new_clock_theme {
+            use center_clock::ClockTheme;
+            app.center_hero.clock_theme = ClockTheme::parse_str(&ct);
+            app.center_hero.needs_redraw = true;
+            app.center_hero.draw();
         }
         if app.clock.style_mode != app.island.style_mode {
             let s = app.island.style_mode;

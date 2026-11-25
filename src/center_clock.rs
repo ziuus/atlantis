@@ -24,7 +24,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrL
 #[path = "config.rs"]
 pub mod config;
 #[allow(unused_imports)]
-pub use config::{CenterHeroConfig, ContrastPreset};
+pub use config::{CenterHeroConfig, ClockTheme, ContrastPreset};
 
 pub const CENTER_HERO_W: u32 = 1100;
 pub const CENTER_HERO_H: u32 = 420;
@@ -108,6 +108,8 @@ pub struct CenterHeroClock {
     #[allow(dead_code)]
     pub screen_height: u32,
     pub needs_redraw: bool,
+    /// Numeral color theme: auto | white | black | liquid_glass
+    pub clock_theme: ClockTheme,
 }
 
 impl CenterHeroClock {
@@ -116,6 +118,17 @@ impl CenterHeroClock {
             1 => false,                   // Forced Dark
             2 => true,                    // Forced Light
             _ => self.is_wallpaper_light, // Auto based on wallpaper
+        }
+    }
+
+    /// Returns the `is_light` value used for numeral rendering,
+    /// overridden by `clock_theme` when not `Auto`.
+    pub fn numeral_is_light(&self) -> bool {
+        match &self.clock_theme {
+            ClockTheme::White => false,       // White numerals
+            ClockTheme::Black => true,        // Black numerals
+            ClockTheme::LiquidGlass => false, // Transparent glass (uses dark shader path + high refraction)
+            ClockTheme::Auto => self.effective_is_light(),
         }
     }
 
@@ -196,6 +209,7 @@ impl CenterHeroClock {
             screen_width,
             screen_height,
             needs_redraw: true,
+            clock_theme: ClockTheme::Auto,
         };
 
         widget.load_config();
@@ -266,6 +280,10 @@ impl CenterHeroClock {
                     if let Some(py) = c.get("pos_y").and_then(|v| v.as_i64()) {
                         self.pos_y = py as i32;
                     }
+                    // Clock numeral theme: auto | white | black | liquid_glass
+                    if let Some(ct) = c.get("clock_theme").and_then(|v| v.as_str()) {
+                        self.clock_theme = ClockTheme::parse_str(ct);
+                    }
                 }
             }
         }
@@ -320,6 +338,9 @@ impl CenterHeroClock {
                             if let Ok(val) = v.parse::<bool>() {
                                 self.show_glass_card = val;
                             }
+                        }
+                        "clock_theme" => {
+                            self.clock_theme = ClockTheme::parse_str(v);
                         }
                         _ => {}
                     }
@@ -393,8 +414,15 @@ impl CenterHeroClock {
         base_dark: [u8; 4],
     ) -> ([u8; 4], [u8; 4], Option<[u8; 4]>) {
         let is_multi_tone_overall = self.zone_profile.map(|p| p.is_multi_tone).unwrap_or(false);
+        // Remap clock_theme to a theme_mode override for text color computation
+        let effective_theme = match &self.clock_theme {
+            ClockTheme::White => 1,       // Force dark mode (white text)
+            ClockTheme::Black => 2,       // Force light mode (dark text)
+            ClockTheme::LiquidGlass => 1, // White frosted labels
+            ClockTheme::Auto => self.theme_mode,
+        };
         compute_zone_text_styling(
-            self.theme_mode,
+            effective_theme,
             self.luminance_threshold,
             self.is_wallpaper_light,
             self.adaptive_halo,
@@ -689,6 +717,13 @@ impl CenterHeroClock {
         self.render_ui_overlay();
 
         let is_light_f32 = if self.effective_is_light() { 1.0 } else { 0.0 };
+        // Clock-theme-aware numeral light value (overrides wallpaper-adaptive for numerals only)
+        let numeral_is_light_f32 = if self.numeral_is_light() {
+            1.0f32
+        } else {
+            0.0f32
+        };
+        let is_liquid_glass_theme = matches!(self.clock_theme, ClockTheme::LiquidGlass);
         let contrast_mode_f32 = match self.contrast_preset.to_ascii_lowercase().as_str() {
             "high_contrast" | "highcontrast" | "high" => 1.0,
             "subtle" | "soft" => 2.0,
@@ -716,17 +751,41 @@ impl CenterHeroClock {
                     (false, h) => (h, "AM"),
                 };
 
+                // Per-theme tuning for numeral Glass surface
+                let (curvature, bevel, refraction, dispersion, blur_val, specular, fresnel) =
+                    if is_liquid_glass_theme {
+                        // Frosted glass: high refraction, low specular, strong blur = transparent lens look
+                        (
+                            24.0f32, 18.0f32, 32.0f32, 0.20f32, 48.0f32, 0.80f32, 0.80f32,
+                        )
+                    } else {
+                        // Default (white/black/auto): crisp Apple glass numerals
+                        (
+                            18.0f32,
+                            14.0f32,
+                            22.0f32,
+                            0.14f32,
+                            if numeral_is_light_f32 > 0.5 {
+                                38.0f32
+                            } else {
+                                28.0f32
+                            },
+                            1.30f32,
+                            0.65f32,
+                        )
+                    };
+
                 let liquid_text = GlassSurface::new()
                     .material(Material::LiquidGlass)
                     .shape(Shape::RoundedRectangle { radius: 0.0 })
                     .bounds(0.0, 0.0, 1.0, 1.0)
-                    .curvature(18.0)
-                    .bevel(14.0)
-                    .refraction(22.0)
-                    .dispersion(0.14)
-                    .blur(if is_light_f32 > 0.5 { 38.0 } else { 28.0 })
-                    .specular(1.30)
-                    .fresnel(0.65)
+                    .curvature(curvature)
+                    .bevel(bevel)
+                    .refraction(refraction)
+                    .dispersion(dispersion)
+                    .blur(blur_val)
+                    .specular(specular)
+                    .fresnel(fresnel)
                     .style_mode(2.0)
                     .contrast_mode(contrast_mode_f32)
                     .rim_boost(self.rim_boost)
@@ -736,7 +795,7 @@ impl CenterHeroClock {
                         hour_12 as f32,
                         now.minute() as f32,
                         now.second() as f32,
-                        is_light_f32,
+                        numeral_is_light_f32,
                     )
                     .element_type(40.0)
                     .deformation(0.0);

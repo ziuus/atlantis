@@ -445,6 +445,7 @@ pub enum IslandIpcEvent {
     SwitchAudioSink,
     ToggleAutoHide,
     SetAutoHide(bool),
+    SetClockTheme(String),
     Toast {
         app: String,
         title: String,
@@ -1704,13 +1705,25 @@ impl IslandWidget {
         }
     }
 
-    pub fn check_ipc(&mut self) -> (Option<f32>, Option<u32>, Option<f32>, bool, bool, bool) {
+    #[allow(clippy::type_complexity)]
+    pub fn check_ipc(
+        &mut self,
+    ) -> (
+        Option<f32>,
+        Option<u32>,
+        Option<f32>,
+        bool,
+        bool,
+        bool,
+        Option<String>,
+    ) {
         let mut style_changed = None;
         let mut theme_changed = None;
         let mut blur_changed = None;
         let mut toggle_todo = false;
         let mut toggle_clock = false;
         let mut toggle_dock = false;
+        let mut clock_theme_changed: Option<String> = None;
         while let Ok(evt) = self.ipc_rx.try_recv() {
             match evt {
                 IslandIpcEvent::Toggle => self.toggle(),
@@ -1883,6 +1896,9 @@ impl IslandWidget {
                 IslandIpcEvent::SwitchAudioSink => {
                     self.toggle_audio_sink();
                 }
+                IslandIpcEvent::SetClockTheme(theme) => {
+                    clock_theme_changed = Some(theme);
+                }
                 IslandIpcEvent::Toast { app, title, body } => {
                     self.show_toast(&app, &title, &body);
                 }
@@ -1895,6 +1911,7 @@ impl IslandWidget {
             toggle_todo,
             toggle_clock,
             toggle_dock,
+            clock_theme_changed,
         )
     }
 
@@ -4280,6 +4297,17 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
                                     send_evt(IslandIpcEvent::BrightnessSet(pct));
                                 }
                             }
+                        } else if trimmed.starts_with("clock_theme ")
+                            || trimmed.starts_with("clock-theme ")
+                            || trimmed.starts_with("numeral_theme ")
+                        {
+                            let theme_val = trimmed
+                                .trim_start_matches("clock_theme ")
+                                .trim_start_matches("clock-theme ")
+                                .trim_start_matches("numeral_theme ")
+                                .trim()
+                                .to_string();
+                            send_evt(IslandIpcEvent::SetClockTheme(theme_val));
                         } else if trimmed == "output"
                             || trimmed == "switch_audio"
                             || trimmed == "toggle_output"
