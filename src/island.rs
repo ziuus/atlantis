@@ -241,12 +241,68 @@ pub fn query_brightness() -> u32 {
     100
 }
 
+#[derive(Debug, Clone)]
+struct AsyncTelemetry {
+    vol_pct: u32,
+    vol_muted: bool,
+    brightness_pct: u32,
+    disk_pct: u32,
+}
+
+static ASYNC_TELEMETRY: std::sync::OnceLock<std::sync::Mutex<AsyncTelemetry>> =
+    std::sync::OnceLock::new();
+
+fn start_async_telemetry_poller() {
+    if ASYNC_TELEMETRY.get().is_some() {
+        return;
+    }
+    let (v, m) = query_wpctl_volume();
+    let b = query_brightness();
+    let store = ASYNC_TELEMETRY.get_or_init(|| {
+        std::sync::Mutex::new(AsyncTelemetry {
+            vol_pct: v,
+            vol_muted: m,
+            brightness_pct: b,
+            disk_pct: 0,
+        })
+    });
+    let _ = std::thread::Builder::new()
+        .name("atlantis-telemetry".into())
+        .spawn(move || loop {
+            let (vol_pct, vol_muted) = query_wpctl_volume();
+            let brightness_pct = query_brightness();
+            let mut disk_pct = 0u32;
+            if let Ok(out) = std::process::Command::new("df").args(["-P", "/"]).output() {
+                if let Ok(txt) = String::from_utf8(out.stdout) {
+                    if let Some(line) = txt.lines().nth(1) {
+                        if let Some(pct_tok) = line.split_whitespace().nth(4) {
+                            if let Ok(p) = pct_tok.trim_end_matches('%').parse::<u32>() {
+                                disk_pct = p.min(100);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Ok(mut lock) = store.lock() {
+                lock.vol_pct = vol_pct;
+                lock.vol_muted = vol_muted;
+                lock.brightness_pct = brightness_pct;
+                if disk_pct > 0 {
+                    lock.disk_pct = disk_pct;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1500));
+        });
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IslandMode {
     Hidden,
     CompactPill,
     MusicExpanded,
     Notification,
+    Notifications,
     ControlCenter,
     QuickAccess,
     SystemOverview,
@@ -335,11 +391,17 @@ impl SysStats {
         }
         self.last_poll = Instant::now();
 
-        // Sample volume & brightness
-        let (v, muted) = query_wpctl_volume();
-        self.vol_pct = v;
-        self.vol_muted = muted;
-        self.brightness_pct = query_brightness();
+        // Non-blocking read from background telemetry thread (zero frame drops!)
+        if let Some(store) = ASYNC_TELEMETRY.get() {
+            if let Ok(t) = store.try_lock() {
+                self.vol_pct = t.vol_pct;
+                self.vol_muted = t.vol_muted;
+                self.brightness_pct = t.brightness_pct;
+                if t.disk_pct > 0 {
+                    self.disk_pct = t.disk_pct;
+                }
+            }
+        }
 
         // Sample network online state
         self.is_online = std::path::Path::new("/sys/class/net/wlan0/carrier").exists()
@@ -443,19 +505,6 @@ impl SysStats {
                     if mc > 1000 {
                         self.cpu_temp_c = mc / 1000;
                         break;
-                    }
-                }
-            }
-        }
-
-        // Sample root disk usage percentage via df -P /
-        if let Ok(out) = std::process::Command::new("df").args(["-P", "/"]).output() {
-            if let Ok(txt) = String::from_utf8(out.stdout) {
-                if let Some(line) = txt.lines().nth(1) {
-                    if let Some(pct_tok) = line.split_whitespace().nth(4) {
-                        if let Ok(p) = pct_tok.trim_end_matches('%').parse::<u32>() {
-                            self.disk_pct = p.min(100);
-                        }
                     }
                 }
             }
@@ -572,6 +621,7 @@ pub struct IslandWidget {
     pub last_music_poll: Instant,
 
     pub active_notif: Option<NotificationData>,
+    pub notif_history: Vec<NotificationData>,
     pub notif_timeout_secs: f32,
 
     pub ipc_rx: Receiver<IslandIpcEvent>,
@@ -657,12 +707,15 @@ impl IslandWidget {
     }
 
     pub fn show_toast(&mut self, app: &str, summary: &str, body: &str) {
-        self.active_notif = Some(NotificationData {
+        let data = NotificationData {
             app: app.to_string(),
             summary: summary.to_string(),
             body: body.to_string(),
             timestamp: Instant::now(),
-        });
+        };
+        self.notif_history.insert(0, data.clone());
+        self.notif_history.truncate(15);
+        self.active_notif = Some(data);
         self.set_mode(IslandMode::Notification);
     }
 
@@ -1040,6 +1093,7 @@ impl IslandWidget {
         let (ipc_tx, ipc_rx) = channel();
         start_fifo_listener(ipc_tx, wakeup_fd);
         start_dbus_monitor();
+        start_async_telemetry_poller();
 
         let font = UIFont::new();
 
@@ -1111,6 +1165,7 @@ impl IslandWidget {
             last_music_poll: Instant::now() - Duration::from_secs(10),
 
             active_notif: None,
+            notif_history: Vec::new(),
             notif_timeout_secs: 3.5,
             ipc_rx,
 
@@ -1540,10 +1595,11 @@ impl IslandWidget {
     fn page_index(mode: IslandMode) -> Option<usize> {
         match mode {
             IslandMode::MusicExpanded => Some(0),
-            IslandMode::ControlCenter => Some(1),
-            IslandMode::SystemOverview => Some(2),
-            IslandMode::QuickAccess => Some(3),
-            IslandMode::PowerMenu => Some(4),
+            IslandMode::Notifications => Some(1),
+            IslandMode::ControlCenter => Some(2),
+            IslandMode::SystemOverview => Some(3),
+            IslandMode::QuickAccess => Some(4),
+            IslandMode::PowerMenu => Some(5),
             IslandMode::Notification => None,
             _ => None,
         }
@@ -1562,8 +1618,8 @@ impl IslandWidget {
             (Self::page_index(old_mode), Self::page_index(new_mode))
         {
             if from_idx != to_idx {
-                let dir = if (to_idx > from_idx && !(from_idx == 0 && to_idx == 4))
-                    || (from_idx == 4 && to_idx == 0)
+                let dir = if (to_idx > from_idx && !(from_idx == 0 && to_idx == 5))
+                    || (from_idx == 5 && to_idx == 0)
                 {
                     1.0f32
                 } else {
@@ -1599,6 +1655,7 @@ impl IslandWidget {
                 self.target_alpha = 1.0;
             }
             IslandMode::MusicExpanded
+            | IslandMode::Notifications
             | IslandMode::ControlCenter
             | IslandMode::QuickAccess
             | IslandMode::SystemOverview
@@ -1621,12 +1678,13 @@ impl IslandWidget {
     fn cycle_mode_forward(&mut self) {
         let next = match self.mode {
             IslandMode::Hidden | IslandMode::CompactPill => IslandMode::MusicExpanded,
-            IslandMode::MusicExpanded => IslandMode::ControlCenter,
+            IslandMode::MusicExpanded => IslandMode::Notifications,
+            IslandMode::Notifications => IslandMode::ControlCenter,
             IslandMode::ControlCenter => IslandMode::SystemOverview,
             IslandMode::SystemOverview => IslandMode::QuickAccess,
             IslandMode::QuickAccess => IslandMode::PowerMenu,
             IslandMode::PowerMenu => IslandMode::CompactPill,
-            IslandMode::Notification => IslandMode::MusicExpanded,
+            IslandMode::Notification => IslandMode::Notifications,
         };
         self.set_mode(next);
     }
@@ -1635,7 +1693,8 @@ impl IslandWidget {
         let prev = match self.mode {
             IslandMode::Hidden | IslandMode::CompactPill => IslandMode::PowerMenu,
             IslandMode::MusicExpanded => IslandMode::CompactPill,
-            IslandMode::ControlCenter => IslandMode::MusicExpanded,
+            IslandMode::Notifications => IslandMode::MusicExpanded,
+            IslandMode::ControlCenter => IslandMode::Notifications,
             IslandMode::SystemOverview => IslandMode::ControlCenter,
             IslandMode::QuickAccess => IslandMode::SystemOverview,
             IslandMode::PowerMenu => IslandMode::QuickAccess,
@@ -1970,6 +2029,8 @@ impl IslandWidget {
                     self.save_config();
                 }
                 IslandIpcEvent::Notification(notif) => {
+                    self.notif_history.insert(0, notif.clone());
+                    self.notif_history.truncate(15);
                     self.active_notif = Some(notif);
                     self.set_mode(IslandMode::Notification);
                 }
@@ -2281,6 +2342,7 @@ impl IslandWidget {
             && matches!(
                 self.mode,
                 IslandMode::MusicExpanded
+                    | IslandMode::Notifications
                     | IslandMode::ControlCenter
                     | IslandMode::QuickAccess
                     | IslandMode::SystemOverview
@@ -2449,6 +2511,7 @@ impl IslandWidget {
         if self.is_hovered
             || self.is_pressed
             || self.mode == IslandMode::MusicExpanded
+            || self.mode == IslandMode::Notifications
             || self.mode == IslandMode::ControlCenter
             || self.mode == IslandMode::SystemOverview
             || self.mode == IslandMode::QuickAccess
@@ -2750,10 +2813,10 @@ impl IslandWidget {
         is_light: bool,
         active_idx: usize,
     ) {
-        let dot_start_x = island_cx + island_w * 0.5 - 76.0;
+        let dot_start_x = island_cx + island_w * 0.5 - 86.0;
         let dot_y = island_top + 22.0;
 
-        for i in 0..5 {
+        for i in 0..6 {
             let dx = dot_start_x + (i as f32) * 11.0;
             let (half_r, col) = if i == active_idx {
                 (
@@ -2937,8 +3000,25 @@ impl IslandWidget {
                         right_icon_x,
                         island_cy,
                         6.5,
-                        col_dim_icon,
+                        if self.notif_history.is_empty() {
+                            col_dim_icon
+                        } else {
+                            col_ink
+                        },
                     );
+                    if !self.notif_history.is_empty() {
+                        UIFont::draw_rounded_rect_fill(
+                            buf,
+                            self.width,
+                            self.height,
+                            right_icon_x + 5.0,
+                            island_cy - 5.0,
+                            2.0,
+                            2.0,
+                            2.0,
+                            [255, 69, 58, 240],
+                        );
+                    }
                 }
             }
             IslandMode::Hidden => {}
@@ -3283,6 +3363,132 @@ impl IslandWidget {
                     8.5,
                     sec_col,
                 );
+            }
+            IslandMode::Notifications => {
+                self.font.draw_text(
+                    buf,
+                    self.width,
+                    self.height,
+                    "NOTIFICATIONS",
+                    cx - island_w * 0.5 + 32.0,
+                    island_top + 24.0,
+                    Tokens::TYPE_CAPTION - 0.5,
+                    col_dim,
+                    FontWeight::SemiBold,
+                );
+
+                if !self.notif_history.is_empty() {
+                    let clr_x = cx + island_w * 0.5 - 116.0;
+                    let clr_y = island_top + 22.0;
+                    let clr_bg = if is_light {
+                        [0, 0, 0, 16]
+                    } else {
+                        [255, 255, 255, 22]
+                    };
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        clr_x,
+                        clr_y,
+                        20.0,
+                        9.0,
+                        9.0,
+                        clr_bg,
+                    );
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        "Clear",
+                        clr_x,
+                        clr_y,
+                        Tokens::TYPE_CAPTION - 1.0,
+                        col_dim,
+                        col_shadow,
+                        FontWeight::Medium,
+                    );
+                }
+
+                if self.notif_history.is_empty() {
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        "No notifications",
+                        cx,
+                        island_top + 86.0,
+                        Tokens::TYPE_BODY_SM,
+                        col_dim,
+                        col_shadow,
+                        FontWeight::Medium,
+                    );
+                } else {
+                    let row_w = island_w - 56.0;
+                    for (idx, n) in self.notif_history.iter().take(3).enumerate() {
+                        let ry = island_top + 52.0 + (idx as f32) * 32.0;
+                        let row_bg = if is_light {
+                            [0, 0, 0, 10]
+                        } else {
+                            [255, 255, 255, 14]
+                        };
+                        UIFont::draw_rounded_rect_fill(
+                            buf,
+                            self.width,
+                            self.height,
+                            cx,
+                            ry,
+                            row_w * 0.5,
+                            13.0,
+                            9.0,
+                            row_bg,
+                        );
+                        let app_tag = safe_truncate(&n.app, 10);
+                        let summary_txt = safe_truncate(&n.summary, 32);
+                        let line = if summary_txt.is_empty() {
+                            safe_truncate(&n.body, 36)
+                        } else {
+                            format!("{} · {}", app_tag, summary_txt)
+                        };
+                        self.font.draw_text_centered_y(
+                            buf,
+                            self.width,
+                            self.height,
+                            &line,
+                            cx - row_w * 0.5 + 12.0,
+                            ry,
+                            Tokens::TYPE_CAPTION,
+                            col_ink,
+                            col_shadow,
+                            FontWeight::Medium,
+                        );
+                        let secs = n.timestamp.elapsed().as_secs();
+                        let age = if secs < 60 {
+                            "now".to_string()
+                        } else if secs < 3600 {
+                            format!("{}m", secs / 60)
+                        } else {
+                            format!("{}h", secs / 3600)
+                        };
+                        let age_w = self.font.measure_text(
+                            &age,
+                            Tokens::TYPE_CAPTION - 1.0,
+                            FontWeight::Medium,
+                        );
+                        self.font.draw_text_centered_y(
+                            buf,
+                            self.width,
+                            self.height,
+                            &age,
+                            cx + row_w * 0.5 - 12.0 - age_w,
+                            ry,
+                            Tokens::TYPE_CAPTION - 1.0,
+                            col_dim,
+                            col_shadow,
+                            FontWeight::Medium,
+                        );
+                    }
+                }
             }
             IslandMode::Notification => {
                 if let Some(notif) = &self.active_notif {
@@ -4286,20 +4492,21 @@ impl IslandWidget {
         self.last_click_time = Instant::now();
         self.last_click_pos = [lx, ly];
 
-        // Page dot clicks across all 5 expanded modes
-        let dot_start_x = island_cx + island_w * 0.5 - 76.0;
+        // Page dot clicks across all 6 expanded modes
+        let dot_start_x = island_cx + island_w * 0.5 - 86.0;
         let dot_y = island_top + 22.0;
         if ly >= dot_y - 12.0
             && ly <= dot_y + 12.0
             && lx >= dot_start_x - 8.0
-            && lx <= dot_start_x + 56.0
+            && lx <= dot_start_x + 66.0
         {
-            let dot_idx = (((lx - dot_start_x + 5.0) / 11.0).floor() as usize).min(4);
+            let dot_idx = (((lx - dot_start_x + 5.0) / 11.0).floor() as usize).min(5);
             match dot_idx {
                 0 => self.set_mode(IslandMode::MusicExpanded),
-                1 => self.set_mode(IslandMode::ControlCenter),
-                2 => self.set_mode(IslandMode::SystemOverview),
-                3 => self.set_mode(IslandMode::QuickAccess),
+                1 => self.set_mode(IslandMode::Notifications),
+                2 => self.set_mode(IslandMode::ControlCenter),
+                3 => self.set_mode(IslandMode::SystemOverview),
+                4 => self.set_mode(IslandMode::QuickAccess),
                 _ => self.set_mode(IslandMode::PowerMenu),
             }
             return;
@@ -4311,13 +4518,17 @@ impl IslandWidget {
                 let disc_cx = island_cx - island_w * 0.5 + 20.0;
                 let island_cy = island_top + island_h * 0.5;
                 let d_disc = ((lx - disc_cx).powi(2) + (ly - island_cy).powi(2)).sqrt();
+                let bell_cx = island_cx + island_w * 0.5 - 22.0;
+                let d_bell = ((lx - bell_cx).powi(2) + (ly - island_cy).powi(2)).sqrt();
                 if d_disc <= 18.0 && self.music.is_playing {
                     let _ = Command::new("playerctl").args(["play-pause"]).spawn();
                     self.music.is_playing = !self.music.is_playing;
+                } else if d_bell <= 18.0 && !self.music.is_playing {
+                    self.set_mode(IslandMode::Notifications);
                 } else if self.music.is_playing {
                     self.set_mode(IslandMode::MusicExpanded);
                 } else {
-                    self.set_mode(IslandMode::SystemOverview);
+                    self.set_mode(IslandMode::ControlCenter);
                 }
             }
             IslandMode::MusicExpanded => {
@@ -4349,6 +4560,16 @@ impl IslandWidget {
                     let _ = Command::new("playerctl")
                         .args(["position", &pos_str])
                         .spawn();
+                }
+            }
+            IslandMode::Notifications => {
+                if !self.notif_history.is_empty() {
+                    let clr_x = island_cx + island_w * 0.5 - 116.0;
+                    let clr_y = island_top + 22.0;
+                    if (lx - clr_x).abs() <= 24.0 && (ly - clr_y).abs() <= 12.0 {
+                        self.notif_history.clear();
+                        self.needs_redraw = true;
+                    }
                 }
             }
             IslandMode::Notification => {
@@ -4602,6 +4823,11 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
                             || trimmed == "slide:control"
                         {
                             send_evt(IslandIpcEvent::ShowMode(IslandMode::ControlCenter));
+                        } else if trimmed == "notif"
+                            || trimmed == "notifications"
+                            || trimmed == "notifs"
+                        {
+                            send_evt(IslandIpcEvent::ShowMode(IslandMode::Notifications));
                         } else if trimmed == "apps"
                             || trimmed == "quick"
                             || trimmed == "slide_apps"
