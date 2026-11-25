@@ -2242,6 +2242,8 @@ impl ClockWidget {
             })
             .collect();
         let bat_pct = self.sys_stats.bat_pct as f32;
+        let bar_y_draw = self.footer_bar_y(slide_y_draw);
+        let show_more_pill = !self.customizing && self.enabled_box_count() > 4;
         let res = if let Some(renderer) = &mut self.renderer {
             renderer.update_overlay(self.width, self.height, &overlay_vec);
 
@@ -2282,7 +2284,7 @@ impl ClockWidget {
                 let tile_h = 132.0f32;
                 let tile_r = 18.0f32;
 
-                box_slots
+                let mut v: Vec<GlassSurface> = box_slots
                     .iter()
                     .map(|&(tcx, tcy, is_bat)| {
                         let cur_cx = cx + (tcx - cx) * t;
@@ -2315,7 +2317,44 @@ impl ClockWidget {
                             .deformation(0.0)
                             .pointer_pos(px, py)
                     })
-                    .collect()
+                    .collect();
+
+                if t > 0.25 {
+                    let pill_w = 92.0f32 * t;
+                    let pill_h = 24.0f32 * t;
+                    let pill_a = ((t - 0.25) / 0.75).clamp(0.0, 1.0);
+                    let mut pill_centers = Vec::new();
+                    if show_more_pill {
+                        pill_centers.push(cx - 58.0);
+                    }
+                    pill_centers.push(cx + 58.0);
+                    for pcx in pill_centers {
+                        v.push(
+                            GlassSurface::new()
+                                .material(Material::LiquidGlass)
+                                .shape(Shape::Capsule)
+                                .bounds(
+                                    (pcx - pill_w * 0.5) / sw,
+                                    (bar_y_draw - pill_h * 0.5) / sh,
+                                    pill_w / sw,
+                                    pill_h / sh,
+                                )
+                                .curvature(12.0)
+                                .bevel(10.0)
+                                .refraction(12.0)
+                                .dispersion(0.10)
+                                .blur(self.blur_radius)
+                                .specular(1.10)
+                                .fresnel(0.55)
+                                .style_mode(eff_style)
+                                .tint(0.0, 0.0, pill_a, is_light_f32)
+                                .element_type(27.0)
+                                .deformation(0.0)
+                                .pointer_pos(px, py),
+                        );
+                    }
+                }
+                v
             };
 
             let _ = renderer.render(&surfaces);
