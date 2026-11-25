@@ -454,6 +454,27 @@ impl ShellApp {
                     self.dock.style_mode = s as f32;
                     self.center_hero.style_mode = s as f32;
                 }
+                if let Some(ps) = val.get("power_save").and_then(|v| v.as_bool()) {
+                    self.island.power_save = ps;
+                    if let Some(r) = &mut self.island.renderer {
+                        r.set_power_save(ps);
+                    }
+                    if let Some(r) = &mut self.clock.renderer {
+                        r.set_power_save(ps);
+                    }
+                    if let Some(r) = &mut self.todo.renderer {
+                        r.set_power_save(ps);
+                    }
+                    if let Some(r) = &mut self.dock.renderer {
+                        r.set_power_save(ps);
+                    }
+                    if let Some(r) = &mut self.launcher.renderer {
+                        r.set_power_save(ps);
+                    }
+                    if let Some(r) = &mut self.center_hero.renderer {
+                        r.set_power_save(ps);
+                    }
+                }
                 if let Some(ab) = val.get("app_backdrop_solid").and_then(|v| v.as_bool()) {
                     self.clock.app_backdrop_solid = ab;
                     self.island.app_backdrop_solid = ab;
@@ -877,6 +898,7 @@ fn main() {
     }
 
     let mut last_minute = 999u32;
+    let mut prev_power_save = false;
     let mut last_frame = Instant::now();
     let mut last_draw = Instant::now();
     let mut last_config_check = Instant::now();
@@ -1018,6 +1040,38 @@ fn main() {
             app.clock.draw();
             app.todo.draw();
             app.dock.draw();
+        }
+        if app.island.power_save != prev_power_save {
+            prev_power_save = app.island.power_save;
+            let ps = prev_power_save;
+            if let Some(r) = &mut app.island.renderer {
+                r.set_power_save(ps);
+            }
+            if let Some(r) = &mut app.clock.renderer {
+                r.set_power_save(ps);
+            }
+            if let Some(r) = &mut app.todo.renderer {
+                r.set_power_save(ps);
+            }
+            if let Some(r) = &mut app.dock.renderer {
+                r.set_power_save(ps);
+            }
+            if let Some(r) = &mut app.launcher.renderer {
+                r.set_power_save(ps);
+            }
+            if let Some(r) = &mut app.center_hero.renderer {
+                r.set_power_save(ps);
+            }
+            let anim_spd = if ps { 25.0 } else { app.island.anim_speed };
+            app.clock.anim_speed = anim_spd;
+            app.todo.anim_speed = anim_spd;
+            app.dock.anim_speed = anim_spd;
+            app.launcher.anim_speed = anim_spd;
+            app.island.needs_redraw = true;
+            app.clock.needs_redraw = true;
+            app.todo.needs_redraw = true;
+            app.dock.needs_redraw = true;
+            app.center_hero.needs_redraw = true;
         }
         if app.clock.app_backdrop_solid != app.island.app_backdrop_solid {
             let ab = app.island.app_backdrop_solid;
@@ -1213,15 +1267,29 @@ fn main() {
 
         let timeout_ms = if animating {
             let elapsed = last_frame.elapsed();
-            let target_frame_ms = 16u64; // ~60fps smooth animation pacing
+            let music_only_compact = app.island.music.is_playing
+                && app.island.mode == island::IslandMode::CompactPill
+                && !todo_active
+                && !clock_active
+                && !dock_active
+                && !launcher_active
+                && !pending_redraw;
+            let target_frame_ms = if app.island.power_save {
+                50u64
+            } else if music_only_compact {
+                33u64 // 30fps for idle compact music wave
+            } else {
+                16u64 // ~60fps smooth animation pacing
+            };
             if elapsed < Duration::from_millis(target_frame_ms) {
                 (target_frame_ms - elapsed.as_millis() as u64).max(1) as i32
             } else {
                 0
             }
+        } else if app.island.power_save {
+            3000
         } else {
-            // Cap idle poll timeout to 200ms so window overlap & top-edge hot zone checks are responsive
-            200
+            1000
         };
 
         let guard = match conn.prepare_read() {

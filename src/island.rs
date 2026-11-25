@@ -526,6 +526,8 @@ pub enum IslandIpcEvent {
     CycleStyle,
     ToggleAppBackdrop,
     SetAppBackdrop(bool),
+    TogglePowerSave,
+    SetPowerSave(bool),
     SetTheme(u32),
     CycleTheme,
     SetDock(IslandDockMode),
@@ -658,6 +660,7 @@ pub struct IslandWidget {
     pub start_time: Instant,
     pub style_mode: f32,
     pub app_backdrop_solid: bool,
+    pub power_save: bool,
     pub dnd_enabled: bool,
     pub theme_mode: u32,
     pub blur_radius: f32,
@@ -1267,6 +1270,7 @@ impl IslandWidget {
             start_time: Instant::now(),
             style_mode,
             app_backdrop_solid: true,
+            power_save: false,
             dnd_enabled: false,
             theme_mode,
             blur_radius,
@@ -1947,6 +1951,7 @@ impl IslandWidget {
         root_val["theme_mode"] = serde_json::json!(self.theme_mode);
         root_val["style_mode"] = serde_json::json!(self.style_mode);
         root_val["app_backdrop_solid"] = serde_json::json!(self.app_backdrop_solid);
+        root_val["power_save"] = serde_json::json!(self.power_save);
         root_val["blur_radius"] = serde_json::json!(self.blur_radius);
         root_val["animation_speed"] = serde_json::json!(self.anim_speed);
 
@@ -2116,6 +2121,16 @@ impl IslandWidget {
                 }
                 IslandIpcEvent::SetAppBackdrop(v) => {
                     self.app_backdrop_solid = v;
+                    self.needs_redraw = true;
+                    self.save_config();
+                }
+                IslandIpcEvent::TogglePowerSave => {
+                    self.power_save = !self.power_save;
+                    self.needs_redraw = true;
+                    self.save_config();
+                }
+                IslandIpcEvent::SetPowerSave(v) => {
+                    self.power_save = v;
                     self.needs_redraw = true;
                     self.save_config();
                 }
@@ -2477,9 +2492,13 @@ impl IslandWidget {
         }
 
         let is_active = !settling
-            || (self.music.is_playing && self.mode != IslandMode::Hidden)
+            || (!self.power_save
+                && self.music.is_playing
+                && matches!(self.mode, IslandMode::CompactPill | IslandMode::MusicExpanded))
             || self.mode == IslandMode::Notification
-            || (self.hover_dwell_start.is_some() && self.mode == IslandMode::CompactPill)
+            || (!self.power_save
+                && self.hover_dwell_start.is_some()
+                && self.mode == IslandMode::CompactPill)
             || self.hud.is_some()
             || hold_active
             || expanded_idle;
@@ -2488,7 +2507,9 @@ impl IslandWidget {
     }
 
     pub fn check_music(&mut self) {
-        let poll_interval = if self.music.is_playing {
+        let poll_interval = if self.power_save {
+            Duration::from_secs(30)
+        } else if self.music.is_playing {
             Duration::from_millis(2000)
         } else if self.mode == IslandMode::MusicExpanded {
             Duration::from_millis(3000)
@@ -2810,7 +2831,7 @@ impl IslandWidget {
         };
 
         let cache_valid = if let Some(ref c) = *lock {
-            c.last_check.elapsed() < Duration::from_millis(300)
+            c.last_check.elapsed() < Duration::from_secs(10)
         } else {
             false
         };
@@ -3488,7 +3509,11 @@ impl IslandWidget {
                 let dnd_x = cx + island_w * 0.5 - 172.0;
                 let dnd_y = island_top + 22.0;
                 let dnd_bg = if self.dnd_enabled {
-                    if is_light { [0, 0, 0, 32] } else { [255, 255, 255, 44] }
+                    if is_light {
+                        [0, 0, 0, 32]
+                    } else {
+                        [255, 255, 255, 44]
+                    }
                 } else if is_light {
                     [0, 0, 0, 12]
                 } else {
@@ -3509,7 +3534,11 @@ impl IslandWidget {
                     buf,
                     self.width,
                     self.height,
-                    if self.dnd_enabled { "DND: On" } else { "DND: Off" },
+                    if self.dnd_enabled {
+                        "DND: On"
+                    } else {
+                        "DND: Off"
+                    },
                     dnd_x,
                     dnd_y,
                     Tokens::TYPE_CAPTION - 1.0,
@@ -3573,7 +3602,11 @@ impl IslandWidget {
                             && (cur_lx - cx).abs() <= row_w * 0.5
                             && (cur_ly - ry).abs() <= 13.0;
                         let row_bg = if row_hover {
-                            if is_light { [0, 0, 0, 20] } else { [255, 255, 255, 26] }
+                            if is_light {
+                                [0, 0, 0, 20]
+                            } else {
+                                [255, 255, 255, 26]
+                            }
                         } else if is_light {
                             [0, 0, 0, 10]
                         } else {
@@ -3613,7 +3646,11 @@ impl IslandWidget {
                         // Copy pill + Dismiss × pill on right of row
                         let copy_cx = row_r - 48.0;
                         let dismiss_cx = row_r - 18.0;
-                        let pill_bg = if is_light { [0, 0, 0, 16] } else { [255, 255, 255, 22] };
+                        let pill_bg = if is_light {
+                            [0, 0, 0, 16]
+                        } else {
+                            [255, 255, 255, 22]
+                        };
                         UIFont::draw_rounded_rect_fill(
                             buf,
                             self.width,
@@ -3922,13 +3959,52 @@ impl IslandWidget {
                 let ab_cx = cx + island_w * 0.5 - 70.0;
                 let ab_cy = island_top + 22.0;
                 let ab_hw = 44.0;
-                let dnd_cx = ab_cx - 76.0;
-                let dnd_hw = 26.0;
+                let dnd_cx = ab_cx - 72.0;
+                let dnd_hw = 22.0;
+                let eco_cx = dnd_cx - 52.0;
+                let eco_hw = 24.0;
+                let eco_hover = self.is_hovered
+                    && (cur_lx - eco_cx).abs() <= eco_hw
+                    && (cur_ly - ab_cy).abs() <= 11.0;
+                let eco_bg = if self.power_save {
+                    [52, 199, 89, if eco_hover { 110 } else { 80 }]
+                } else if is_light {
+                    [0, 0, 0, if eco_hover { 20 } else { 10 }]
+                } else {
+                    [255, 255, 255, if eco_hover { 28 } else { 14 }]
+                };
+                UIFont::draw_rounded_rect_fill(
+                    buf,
+                    self.width,
+                    self.height,
+                    eco_cx,
+                    ab_cy,
+                    eco_hw,
+                    10.5,
+                    10.5,
+                    eco_bg,
+                );
+                self.font.draw_text_centered(
+                    buf,
+                    self.width,
+                    self.height,
+                    if self.power_save { "Eco" } else { "Full" },
+                    eco_cx,
+                    ab_cy,
+                    Tokens::TYPE_CAPTION - 1.0,
+                    if self.power_save { col_ink } else { col_dim },
+                    col_shadow,
+                    FontWeight::SemiBold,
+                );
                 let dnd_hover = self.is_hovered
                     && (cur_lx - dnd_cx).abs() <= dnd_hw
                     && (cur_ly - ab_cy).abs() <= 11.0;
                 let dnd_bg = if self.dnd_enabled {
-                    if is_light { [0, 0, 0, if dnd_hover { 34 } else { 22 }] } else { [255, 255, 255, if dnd_hover { 48 } else { 32 }] }
+                    if is_light {
+                        [0, 0, 0, if dnd_hover { 34 } else { 22 }]
+                    } else {
+                        [255, 255, 255, if dnd_hover { 48 } else { 32 }]
+                    }
                 } else if is_light {
                     [0, 0, 0, if dnd_hover { 20 } else { 10 }]
                 } else {
@@ -3990,7 +4066,11 @@ impl IslandWidget {
                     ab_cx,
                     ab_cy,
                     Tokens::TYPE_CAPTION - 1.0,
-                    if self.app_backdrop_solid { col_ink } else { col_dim },
+                    if self.app_backdrop_solid {
+                        col_ink
+                    } else {
+                        col_dim
+                    },
                     col_shadow,
                     FontWeight::SemiBold,
                 );
@@ -4899,8 +4979,15 @@ impl IslandWidget {
             IslandMode::ControlCenter => {
                 let ab_cx = island_cx + island_w * 0.5 - 70.0;
                 let ab_cy = island_top + 22.0;
-                let dnd_cx = ab_cx - 76.0;
-                if (lx - dnd_cx).abs() <= 28.0 && (ly - ab_cy).abs() <= 13.0 {
+                let dnd_cx = ab_cx - 72.0;
+                let eco_cx = dnd_cx - 52.0;
+                if (lx - eco_cx).abs() <= 26.0 && (ly - ab_cy).abs() <= 13.0 {
+                    self.power_save = !self.power_save;
+                    self.needs_redraw = true;
+                    self.save_config();
+                    return;
+                }
+                if (lx - dnd_cx).abs() <= 24.0 && (ly - ab_cy).abs() <= 13.0 {
                     self.dnd_enabled = !self.dnd_enabled;
                     self.needs_redraw = true;
                     return;
@@ -5213,6 +5300,12 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
                             send_evt(IslandIpcEvent::SetAppBackdrop(true));
                         } else if trimmed == "app_backdrop off" || trimmed == "app_bg off" {
                             send_evt(IslandIpcEvent::SetAppBackdrop(false));
+                        } else if trimmed == "power_save" || trimmed == "eco" {
+                            send_evt(IslandIpcEvent::TogglePowerSave);
+                        } else if trimmed == "power_save on" || trimmed == "eco on" {
+                            send_evt(IslandIpcEvent::SetPowerSave(true));
+                        } else if trimmed == "power_save off" || trimmed == "eco off" {
+                            send_evt(IslandIpcEvent::SetPowerSave(false));
                         } else if trimmed == "theme auto"
                             || trimmed == "auto"
                             || trimmed == "theme 0"
