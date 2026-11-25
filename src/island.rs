@@ -2506,6 +2506,51 @@ impl IslandWidget {
         }
     }
 
+    pub fn query_active_workspace() -> i32 {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixStream;
+
+        struct WsCache {
+            last_check: Instant,
+            ws_id: i32,
+        }
+        static WS_CACHE: std::sync::Mutex<Option<WsCache>> = std::sync::Mutex::new(None);
+
+        if let Ok(mut lock) = WS_CACHE.lock() {
+            if let Some(ref c) = *lock {
+                if c.last_check.elapsed() < Duration::from_millis(250) {
+                    return c.ws_id;
+                }
+            }
+            let mut ws_id = 1i32;
+            if let Ok(his) = std::env::var("HYPRLAND_INSTANCE_SIGNATURE") {
+                let xdg = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+                    let uid = unsafe { libc::getuid() };
+                    format!("/run/user/{}", uid)
+                });
+                let sock_path = format!("{}/hypr/{}/.socket.sock", xdg, his);
+                if let Ok(mut stream) = UnixStream::connect(&sock_path) {
+                    let _ = stream.set_read_timeout(Some(Duration::from_millis(20)));
+                    let _ = stream.write_all(b"j/activeworkspace");
+                    let mut out = String::new();
+                    if stream.read_to_string(&mut out).is_ok() {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&out) {
+                            if let Some(id) = val.get("id").and_then(|v| v.as_i64()) {
+                                ws_id = id as i32;
+                            }
+                        }
+                    }
+                }
+            }
+            *lock = Some(WsCache {
+                last_check: Instant::now(),
+                ws_id,
+            });
+            return ws_id;
+        }
+        1
+    }
+
     pub fn query_hyprland_cursor() -> Option<(i32, i32)> {
         use std::io::{Read, Write};
         use std::os::unix::net::UnixStream;
@@ -2819,9 +2864,18 @@ impl IslandWidget {
                         );
                     }
                 } else {
-                    // ── Sleek Dynamic Island Idle Pill (Brightness • Status • Volume) ──
-                    // Zero duplication: Time/Date = Center Clock, RAM/CPU/Bat = Top-Left, Tasks = Top-Right
-                    let sz_bat = 12.0f32;
+                    // ── Sleek Dynamic Island Idle Pill (Time • Status • Workspace) ──
+                    let now = chrono::Local::now();
+                    use chrono::Timelike;
+                    let (_is_pm, hour) = now.hour12();
+                    let min = now.minute();
+                    let ampm = if now.hour() >= 12 { "PM" } else { "AM" };
+                    let time_main = format!("{}:{:02}", hour, min);
+
+                    let sz_time = 13.5f32;
+                    let sz_ampm = 9.0f32;
+                    let sz_ws = 11.5f32;
+
                     let col_secondary = if is_light {
                         [8, 12, 20, 165]
                     } else {
@@ -2829,31 +2883,37 @@ impl IslandWidget {
                     };
                     let no_shadow = [0u8, 0, 0, 0];
 
-                    let pill_left = island_cx - island_w * 0.5 + 22.0;
-                    let bri_icon_cx = pill_left + 7.0;
-                    Self::draw_brightness_icon(
-                        buf,
-                        self.width,
-                        self.height,
-                        bri_icon_cx,
-                        island_cy,
-                        col_ink,
-                    );
-                    let bri_str = format!("{}%", self.sys_stats.brightness_pct);
+                    // Left: crisp Time (AM/PM dimmed)
+                    let pill_left = island_cx - island_w * 0.5 + 20.0;
+                    let w_main = self
+                        .font
+                        .measure_text(&time_main, sz_time, FontWeight::Bold);
                     self.font.draw_text_centered_y(
                         buf,
                         self.width,
                         self.height,
-                        &bri_str,
-                        bri_icon_cx + 14.0,
+                        &time_main,
+                        pill_left,
                         island_cy,
-                        sz_bat,
+                        sz_time,
                         col_ink,
+                        no_shadow,
+                        FontWeight::Bold,
+                    );
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        ampm,
+                        pill_left + w_main + 3.5,
+                        island_cy + 0.5,
+                        sz_ampm,
+                        col_secondary,
                         no_shadow,
                         FontWeight::SemiBold,
                     );
 
-                    // Subtle status dot (online/charging) near center-right
+                    // Center: subtle online/charging dot
                     let dot_col = if self.sys_stats.bat_charging {
                         [52, 199, 89, 220]
                     } else if !self.sys_stats.is_online {
@@ -2867,7 +2927,7 @@ impl IslandWidget {
                         buf,
                         self.width,
                         self.height,
-                        island_cx,
+                        island_cx + 14.0,
                         island_cy,
                         2.0,
                         2.0,
@@ -2875,48 +2935,22 @@ impl IslandWidget {
                         dot_col,
                     );
 
-                    // Right-aligned Volume % + crisp hairline speaker icon (no duplicate battery!)
-                    let vol_pct = self.sys_stats.vol_pct;
-                    let vol_str = if self.sys_stats.vol_muted {
-                        "Mute".to_string()
-                    } else {
-                        format!("{}%", vol_pct)
-                    };
-                    let w_vol_txt = self
-                        .font
-                        .measure_text(&vol_str, sz_bat, FontWeight::SemiBold);
+                    // Right: active Hyprland workspace ("WS 1")
+                    let ws_id = Self::query_active_workspace();
+                    let ws_str = format!("WS {}", ws_id);
+                    let w_ws = self.font.measure_text(&ws_str, sz_ws, FontWeight::SemiBold);
                     let pill_right = island_cx + island_w * 0.5 - 20.0;
-                    let vol_icon_cx = pill_right - 8.0;
-                    let vol_txt_x = vol_icon_cx - 12.0 - w_vol_txt;
-
                     self.font.draw_text_centered_y(
                         buf,
                         self.width,
                         self.height,
-                        &vol_str,
-                        vol_txt_x,
+                        &ws_str,
+                        pill_right - w_ws,
                         island_cy,
-                        sz_bat,
-                        if self.sys_stats.vol_muted {
-                            col_secondary
-                        } else {
-                            col_ink
-                        },
+                        sz_ws,
+                        col_secondary,
                         no_shadow,
                         FontWeight::SemiBold,
-                    );
-                    Self::draw_speaker_icon(
-                        buf,
-                        self.width,
-                        self.height,
-                        vol_icon_cx,
-                        island_cy,
-                        if self.sys_stats.vol_muted {
-                            col_secondary
-                        } else {
-                            col_ink
-                        },
-                        !self.sys_stats.vol_muted && vol_pct > 0,
                     );
                 }
             }
