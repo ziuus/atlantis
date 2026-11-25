@@ -1,9 +1,9 @@
 [package]
-name = "liquid-shell"
+name = "atlantis"
 version = "0.1.0"
 edition = "2021"
-description = "Turnkey Wayland desktop shell & rice built on the Liquid Glass physical optical engine"
-repository = "https://github.com/ziuus/liquid-shell"
+description = "🔱 Atlantis — Turnkey physical optical glass desktop environment and rice for Wayland"
+repository = "https://github.com/ziuus/atlantis"
 license = "MIT"
 
 [dependencies]

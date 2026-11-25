@@ -1,6 +1,6 @@
-# Liquid Shell (Wayland Desktop Rice)
+# 🔱 Atlantis
 
-Turnkey physical optical lensing desktop environment and layer-shell rice for Wayland compositors (Hyprland, Sway, River, Wayfire, Labwc, Niri), powered by the [Liquid Glass Physical Rendering Engine](https://github.com/ziuus/liquid-glass).
+> **Turnkey physical optical glass desktop environment and layer-shell rice for Wayland** (Hyprland, Sway, River, Wayfire, Labwc, Niri), powered by the [Liquid Glass Physical Rendering Engine](https://github.com/ziuus/liquid-glass).
 
 ---
 
@@ -34,8 +34,8 @@ Turnkey physical optical lensing desktop environment and layer-shell rice for Wa
 ### Automated Turnkey Installer
 
 ```bash
-git clone https://github.com/ziuus/liquid-shell.git
-cd liquid-shell
+git clone https://github.com/ziuus/atlantis.git
+cd atlantis
 ./install.sh --systemd
 ```
 
@@ -68,6 +68,6 @@ island-ctl --cycle-style      # Cycle Obsidian -> Frosted -> Liquid Glass
 
 ## ⚙️ Core Engine
 
-Liquid Shell is built on the **Liquid Glass Engine**:
+Atlantis is built on the **Liquid Glass Engine**:
 - **Repository**: [https://github.com/ziuus/liquid-glass](https://github.com/ziuus/liquid-glass)
 - Pure Rust, headless WGPU + WGSL physical optical rendering pipeline with RK4 spring physics.
