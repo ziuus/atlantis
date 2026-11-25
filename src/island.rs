@@ -2450,11 +2450,7 @@ impl IslandWidget {
             return;
         }
 
-        let check_interval = if self.mode == IslandMode::Hidden {
-            Duration::from_millis(150)
-        } else {
-            Duration::from_millis(150)
-        };
+        let check_interval = Duration::from_millis(150);
         if self.last_window_check.elapsed() < check_interval {
             return;
         }
