@@ -191,6 +191,7 @@ pub struct ClockWidget {
     pub is_window_overlapping: bool,
     pub app_backdrop_solid: bool,
     pub power_save: bool,
+    pub opened_via_shortcut: bool,
     pub last_window_check: Instant,
     pub is_hidden_by_window: bool,
     pub needs_redraw: bool,
@@ -361,6 +362,7 @@ impl ClockWidget {
             is_window_overlapping: false,
             app_backdrop_solid: true,
             power_save: false,
+            opened_via_shortcut: false,
             last_window_check: Instant::now() - Duration::from_secs(60),
             is_hidden_by_window: false,
             needs_redraw: true,
@@ -644,20 +646,33 @@ impl ClockWidget {
     pub fn collapse(&mut self) {
         if !self.is_compact {
             self.is_compact = true;
+            self.opened_via_shortcut = false;
             self.customizing = false;
             self.show_more = false;
             self.more_spring.set_target(0.0);
             self.hovered_tab = None;
             self.hovered_row = None;
             self.size_spring.set_target(0.0);
+            if self.is_window_overlapping {
+                self.is_hidden_by_window = true;
+            }
+            if let Some(ls) = &self.layer_surface {
+                ls.set_keyboard_interactivity(KeyboardInteractivity::None);
+            }
             self.needs_input_region_update = true;
+            self.needs_redraw = true;
         }
     }
 
-    #[allow(dead_code)]
     pub fn toggle_expand(&mut self) {
+        self.enabled = true;
         if self.is_compact {
+            self.opened_via_shortcut = true;
             self.expand();
+            if let Some(ls) = &self.layer_surface {
+                ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+            }
+            self.needs_redraw = true;
         } else {
             self.collapse();
         }
@@ -1160,8 +1175,9 @@ impl ClockWidget {
             self.power_hold_progress = (self.power_hold_progress - eff_dt * 4.0).max(0.0);
         }
 
-        // Auto-collapse after inactivity (do not collapse while holding power!)
+        // Auto-collapse after inactivity (do not collapse while holding power or opened via shortcut!)
         if !self.is_compact
+            && !self.opened_via_shortcut
             && !self.is_hovered
             && self.power_held.is_none()
             && self.last_hover_time.elapsed().as_secs_f32() > 4.0

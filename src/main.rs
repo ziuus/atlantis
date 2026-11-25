@@ -977,9 +977,7 @@ fn main() {
             app.todo.draw();
         }
         if toggle_clock {
-            app.clock.enabled = !app.clock.enabled;
-            app.clock.needs_input_region_update = true;
-            app.clock.draw();
+            app.clock.toggle_expand();
         }
         if toggle_dock {
             app.dock.toggle_expand();
