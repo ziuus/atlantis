@@ -662,6 +662,7 @@ pub struct IslandWidget {
     pub app_backdrop_solid: bool,
     pub power_save: bool,
     pub dnd_enabled: bool,
+    pub opened_via_shortcut: bool,
     pub theme_mode: u32,
     pub blur_radius: f32,
     pub anim_speed: f32,
@@ -722,6 +723,7 @@ impl IslandWidget {
             return false;
         }
         self.is_hovered = false;
+        self.opened_via_shortcut = false;
         self.hover_dwell_start = None;
         self.hot_edge_dwell_start = None;
         self.hud = None;
@@ -1272,6 +1274,7 @@ impl IslandWidget {
             app_backdrop_solid: true,
             power_save: false,
             dnd_enabled: false,
+            opened_via_shortcut: false,
             theme_mode,
             blur_radius,
             anim_speed,
@@ -1428,6 +1431,7 @@ impl IslandWidget {
                     }
                 } else {
                     self.is_hovered = false;
+        self.opened_via_shortcut = false;
                     self.hover_dwell_start = None;
                     if let Some(ls) = &self.layer_surface {
                         ls.set_keyboard_interactivity(KeyboardInteractivity::None);
@@ -1438,6 +1442,8 @@ impl IslandWidget {
             }
             PointerEventKind::Leave { .. } => {
                 self.is_hovered = false;
+                self.opened_via_shortcut = false;
+        self.opened_via_shortcut = false;
                 self.is_pressed = false;
                 self.is_swiping = false;
                 self.hot_edge_dwell_start = None;
@@ -1482,6 +1488,7 @@ impl IslandWidget {
                     }
                 } else {
                     self.is_hovered = false;
+        self.opened_via_shortcut = false;
                     self.hover_dwell_start = None;
                 }
 
@@ -2052,14 +2059,17 @@ impl IslandWidget {
     fn toggle(&mut self) {
         match self.mode {
             IslandMode::Hidden | IslandMode::CompactPill => {
+                self.opened_via_shortcut = true;
                 self.set_mode(self.default_expanded_mode());
                 self.last_interaction = Instant::now();
                 if let Some(ls) = &self.layer_surface {
                     ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
                 }
                 self.needs_input_region_update = true;
+                self.needs_redraw = true;
             }
             _ => {
+                self.opened_via_shortcut = false;
                 if self.is_window_overlapping {
                     self.set_mode(IslandMode::Hidden);
                 } else {
@@ -2069,6 +2079,7 @@ impl IslandWidget {
                     ls.set_keyboard_interactivity(KeyboardInteractivity::None);
                 }
                 self.needs_input_region_update = true;
+                self.needs_redraw = true;
             }
         }
     }
@@ -2491,7 +2502,8 @@ impl IslandWidget {
         // When expanded, retract back after 3.0s timeout of no user interaction
         let retract_timeout = Duration::from_millis(1200);
 
-        let expanded_idle = !self.is_hovered
+        let expanded_idle = !self.opened_via_shortcut
+            && !self.is_hovered
             && !self.is_pressed
             && self.hud.is_none()
             && matches!(
