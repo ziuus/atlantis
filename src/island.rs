@@ -518,6 +518,7 @@ pub enum IslandIpcEvent {
     ToggleTodo,
     ToggleClock,
     ToggleAppDock,
+    ToggleLauncher,
     Notification(NotificationData),
     NextMenu,
     PrevMenu,
@@ -1975,6 +1976,7 @@ impl IslandWidget {
         bool,
         bool,
         Option<String>,
+        bool,
     ) {
         let mut style_changed = None;
         let mut theme_changed = None;
@@ -1982,6 +1984,7 @@ impl IslandWidget {
         let mut toggle_todo = false;
         let mut toggle_clock = false;
         let mut toggle_dock = false;
+        let mut toggle_launcher = false;
         let mut clock_theme_changed: Option<String> = None;
         while let Ok(evt) = self.ipc_rx.try_recv() {
             match evt {
@@ -2001,6 +2004,9 @@ impl IslandWidget {
                 }
                 IslandIpcEvent::ToggleAppDock => {
                     toggle_dock = true;
+                }
+                IslandIpcEvent::ToggleLauncher => {
+                    toggle_launcher = true;
                 }
                 IslandIpcEvent::NextMenu => self.cycle_mode_forward(),
                 IslandIpcEvent::PrevMenu => self.cycle_mode_backward(),
@@ -2173,6 +2179,7 @@ impl IslandWidget {
             toggle_clock,
             toggle_dock,
             clock_theme_changed,
+            toggle_launcher,
         )
     }
 
@@ -4842,6 +4849,11 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
                             send_evt(IslandIpcEvent::ToggleTodo);
                         } else if trimmed == "clock" || trimmed == "toggle_clock" {
                             send_evt(IslandIpcEvent::ToggleClock);
+                        } else if trimmed == "launcher"
+                            || trimmed == "launch"
+                            || trimmed == "search"
+                        {
+                            send_evt(IslandIpcEvent::ToggleLauncher);
                         } else if trimmed == "dock" || trimmed == "bar" || trimmed == "toggle_dock"
                         {
                             send_evt(IslandIpcEvent::ToggleAppDock);

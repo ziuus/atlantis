@@ -25,11 +25,13 @@ mod center_clock;
 mod clock;
 mod dock;
 mod island;
+mod launcher;
 mod todo;
 use center_clock::CenterHeroClock;
 use clock::ClockWidget;
 use dock::DockWidget;
 use island::IslandWidget;
+use launcher::LauncherWidget;
 use todo::TodoWidget;
 
 struct ShellApp {
@@ -51,6 +53,7 @@ struct ShellApp {
     todo: TodoWidget,
     dock: DockWidget,
     center_hero: CenterHeroClock,
+    launcher: LauncherWidget,
 
     exit: bool,
     first_configure_count: u32,
@@ -109,6 +112,7 @@ impl OutputHandler for ShellApp {
                 (1920, 1080)
             };
             self.center_hero.set_screen_geometry(w, h);
+            self.launcher.set_screen_geometry(w, h);
         }
     }
 
@@ -130,6 +134,7 @@ impl OutputHandler for ShellApp {
                 (1920, 1080)
             };
             self.center_hero.set_screen_geometry(w, h);
+            self.launcher.set_screen_geometry(w, h);
         }
     }
 
@@ -188,6 +193,14 @@ impl LayerShellHandler for ShellApp {
             }
             self.dock.draw();
             self.first_configure_count += 1;
+        } else if sid == self.launcher.surface_id() {
+            self.launcher.configure(configure);
+            if self.launcher.renderer.is_none() {
+                self.launcher.init_gpu(&self.gpu);
+                self.launcher
+                    .apply_input_region(&self.compositor_state, _qh);
+            }
+            self.launcher.draw();
         } else if sid == self.center_hero.surface_id() {
             self.center_hero.configure(configure);
             if self.center_hero.renderer.is_none() {
@@ -281,6 +294,12 @@ impl KeyboardHandler for ShellApp {
         _serial: u32,
         event: KeyEvent,
     ) {
+        if self.launcher.on_keyboard_event(&event) {
+            self.launcher.needs_redraw = true;
+            self.launcher.draw();
+            self.launcher.needs_redraw = false;
+            return;
+        }
         if self.todo.on_keyboard_event(&event) {
             self.todo.draw();
             self.todo.needs_redraw = false;
@@ -333,6 +352,10 @@ impl PointerHandler for ShellApp {
             } else if sid == self.dock.surface_id() {
                 if self.dock.on_pointer_event(event) {
                     self.dock.needs_redraw = true;
+                }
+            } else if sid == self.launcher.surface_id() {
+                if self.launcher.on_pointer_event(event) {
+                    self.launcher.needs_redraw = true;
                 }
             } else if sid == self.center_hero.surface_id()
                 && self.center_hero.on_pointer_event(event)
@@ -704,6 +727,7 @@ fn main() {
     let mut todo = TodoWidget::new(&qh, &compositor_state, &layer_shell, display_ptr);
     let mut dock = DockWidget::new(&qh, &compositor_state, &layer_shell, display_ptr);
     let mut center_hero = CenterHeroClock::new(&qh, &compositor_state, &layer_shell, display_ptr);
+    let mut launcher = LauncherWidget::new(&qh, &compositor_state, &layer_shell, display_ptr);
     clock.style_mode = island.style_mode;
     clock.theme_mode = island.theme_mode;
     clock.blur_radius = island.blur_radius;
@@ -716,6 +740,9 @@ fn main() {
     center_hero.style_mode = island.style_mode;
     center_hero.theme_mode = island.theme_mode;
     center_hero.blur_radius = island.blur_radius;
+    launcher.style_mode = island.style_mode;
+    launcher.theme_mode = island.theme_mode;
+    launcher.blur_radius = island.blur_radius;
 
     let home = std::env::var("HOME").unwrap_or_default();
     let conf_candidates = [
@@ -773,6 +800,15 @@ fn main() {
             center_hero.height,
         );
         center_hero.update_wallpaper(hero_crop);
+
+        let launcher_crop = WallpaperManager::get_wallpaper_crop(
+            cache,
+            launcher.pos_x.max(0) as u32,
+            launcher.pos_y.max(0) as u32,
+            launcher.width,
+            launcher.height,
+        );
+        launcher.update_wallpaper(launcher_crop);
     }
     wallpaper_mgr.release_full_buffer();
 
@@ -796,6 +832,7 @@ fn main() {
         exit: false,
         first_configure_count: 0,
         wallpaper_mgr,
+        launcher,
     };
 
     app.reload_config(&conf_path);
@@ -884,7 +921,13 @@ fn main() {
             toggle_clock,
             toggle_dock,
             new_clock_theme,
+            toggle_launcher,
         ) = app.island.check_ipc();
+        if toggle_launcher {
+            app.launcher.toggle();
+            app.launcher.draw();
+            app.launcher.needs_redraw = false;
+        }
         if toggle_todo {
             app.todo.toggle_expand();
             app.todo.draw();
@@ -902,6 +945,7 @@ fn main() {
             app.clock.style_mode = s;
             app.todo.style_mode = s;
             app.dock.style_mode = s;
+            app.launcher.style_mode = s;
             app.clock.draw();
             app.todo.draw();
             app.dock.draw();
@@ -911,6 +955,7 @@ fn main() {
             app.clock.theme_mode = t;
             app.todo.theme_mode = t;
             app.dock.theme_mode = t;
+            app.launcher.theme_mode = t;
             app.clock.draw();
             app.todo.draw();
             app.dock.draw();
@@ -920,6 +965,7 @@ fn main() {
             app.clock.blur_radius = b;
             app.todo.blur_radius = b;
             app.dock.blur_radius = b;
+            app.launcher.blur_radius = b;
             app.clock.draw();
             app.todo.draw();
             app.dock.draw();
@@ -936,6 +982,7 @@ fn main() {
             app.clock.style_mode = s;
             app.todo.style_mode = s;
             app.dock.style_mode = s;
+            app.launcher.style_mode = s;
             app.clock.draw();
             app.todo.draw();
             app.dock.draw();
@@ -945,6 +992,7 @@ fn main() {
             app.clock.theme_mode = t;
             app.todo.theme_mode = t;
             app.dock.theme_mode = t;
+            app.launcher.theme_mode = t;
             app.clock.draw();
             app.todo.draw();
             app.dock.draw();
@@ -954,6 +1002,7 @@ fn main() {
             app.clock.blur_radius = b;
             app.todo.blur_radius = b;
             app.dock.blur_radius = b;
+            app.launcher.blur_radius = b;
             app.clock.draw();
             app.todo.draw();
             app.dock.draw();
@@ -970,6 +1019,7 @@ fn main() {
         let todo_active = app.todo.update_physics(dt);
         let clock_active = app.clock.update_physics(dt);
         let dock_active = app.dock.update_physics(dt);
+        let launcher_active = app.launcher.update_physics(dt);
 
         if app.island.needs_input_region_update {
             app.island.apply_input_region(&app.compositor_state, &qh);
@@ -982,6 +1032,9 @@ fn main() {
         }
         if app.dock.needs_input_region_update {
             app.dock.apply_input_region(&app.compositor_state, &qh);
+        }
+        if app.launcher.needs_input_region_update {
+            app.launcher.apply_input_region(&app.compositor_state, &qh);
         }
 
         // Check wallpaper updates across all widgets
@@ -1041,6 +1094,17 @@ fn main() {
                 app.center_hero.update_wallpaper(hero_crop);
                 app.center_hero.draw();
                 app.center_hero.needs_redraw = false;
+
+                let lc = WallpaperManager::get_wallpaper_crop(
+                    cache,
+                    app.launcher.pos_x.max(0) as u32,
+                    app.launcher.pos_y.max(0) as u32,
+                    app.launcher.width,
+                    app.launcher.height,
+                );
+                app.launcher.update_wallpaper(lc);
+                app.launcher.draw();
+                app.launcher.needs_redraw = false;
             }
             app.wallpaper_mgr.release_full_buffer();
         }
@@ -1048,7 +1112,8 @@ fn main() {
         let now_local = chrono::Local::now();
         let cur_min = now_local.minute();
         let minute_changed = cur_min != last_minute;
-        let any_active = island_active || todo_active || clock_active || dock_active;
+        let any_active =
+            island_active || todo_active || clock_active || dock_active || launcher_active;
         let any_dwelling = app.island.hover_dwell_start.is_some()
             || app.island.hot_edge_dwell_start.is_some()
             || app.dock.hot_edge_dwell_start.is_some();
@@ -1089,9 +1154,15 @@ fn main() {
                 drawn = true;
             }
 
-            if dock_active || app.dock.needs_redraw {
+            if dock_active || app.dock.needs_redraw || app.launcher.needs_redraw {
                 app.dock.draw();
                 app.dock.needs_redraw = false;
+                drawn = true;
+            }
+
+            if launcher_active || app.launcher.needs_redraw {
+                app.launcher.draw();
+                app.launcher.needs_redraw = false;
                 drawn = true;
             }
 
