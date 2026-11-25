@@ -658,6 +658,7 @@ pub struct IslandWidget {
     pub start_time: Instant,
     pub style_mode: f32,
     pub app_backdrop_solid: bool,
+    pub dnd_enabled: bool,
     pub theme_mode: u32,
     pub blur_radius: f32,
     pub anim_speed: f32,
@@ -670,6 +671,31 @@ pub struct IslandWidget {
 }
 
 impl IslandWidget {
+    pub fn focus_or_launch_app(app: &str) {
+        let clean: String = app
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
+            .collect();
+        let target = clean.trim();
+        if target.is_empty() {
+            return;
+        }
+        let script = format!(
+            "hyprctl dispatch focuswindow 'class:(?i){t}' || hyprctl dispatch focuswindow 'title:(?i){t}'",
+            t = target
+        );
+        let _ = Command::new("sh").args(["-c", &script]).spawn();
+    }
+
+    pub fn copy_notification(n: &NotificationData) {
+        let msg = if n.body.is_empty() {
+            format!("{}: {}", n.app, n.summary)
+        } else {
+            format!("{}: {} — {}", n.app, n.summary, n.body)
+        };
+        let _ = Command::new("wl-copy").arg(msg.trim()).spawn();
+    }
+
     pub fn effective_style_mode(&self) -> f32 {
         if self.app_backdrop_solid && self.is_window_overlapping {
             0.0
@@ -1233,6 +1259,7 @@ impl IslandWidget {
             start_time: Instant::now(),
             style_mode,
             app_backdrop_solid: true,
+            dnd_enabled: false,
             theme_mode,
             blur_radius,
             anim_speed,
@@ -2099,8 +2126,12 @@ impl IslandWidget {
                 IslandIpcEvent::Notification(notif) => {
                     self.notif_history.insert(0, notif.clone());
                     self.notif_history.truncate(15);
-                    self.active_notif = Some(notif);
-                    self.set_mode(IslandMode::Notification);
+                    if !self.dnd_enabled {
+                        self.active_notif = Some(notif);
+                        self.set_mode(IslandMode::Notification);
+                    } else {
+                        self.needs_redraw = true;
+                    }
                 }
                 IslandIpcEvent::SetDock(d) => self.set_dock_mode(d),
                 IslandIpcEvent::ToggleDock => self.toggle_dock_mode(),
@@ -3446,8 +3477,45 @@ impl IslandWidget {
                     FontWeight::SemiBold,
                 );
 
+                let cur_lx = self.cursor_pos[0] * (self.width as f32);
+                let cur_ly = self.cursor_pos[1] * (self.height as f32);
+
+                // DND toggle pill
+                let dnd_x = cx + island_w * 0.5 - 172.0;
+                let dnd_y = island_top + 22.0;
+                let dnd_bg = if self.dnd_enabled {
+                    if is_light { [0, 0, 0, 32] } else { [255, 255, 255, 44] }
+                } else if is_light {
+                    [0, 0, 0, 12]
+                } else {
+                    [255, 255, 255, 16]
+                };
+                UIFont::draw_rounded_rect_fill(
+                    buf,
+                    self.width,
+                    self.height,
+                    dnd_x,
+                    dnd_y,
+                    28.0,
+                    9.5,
+                    9.5,
+                    dnd_bg,
+                );
+                self.font.draw_text_centered(
+                    buf,
+                    self.width,
+                    self.height,
+                    if self.dnd_enabled { "DND: On" } else { "DND: Off" },
+                    dnd_x,
+                    dnd_y,
+                    Tokens::TYPE_CAPTION - 1.0,
+                    if self.dnd_enabled { col_ink } else { col_dim },
+                    col_shadow,
+                    FontWeight::SemiBold,
+                );
+
                 if !self.notif_history.is_empty() {
-                    let clr_x = cx + island_w * 0.5 - 116.0;
+                    let clr_x = cx + island_w * 0.5 - 114.0;
                     let clr_y = island_top + 22.0;
                     let clr_bg = if is_light {
                         [0, 0, 0, 16]
@@ -3460,9 +3528,9 @@ impl IslandWidget {
                         self.height,
                         clr_x,
                         clr_y,
-                        20.0,
-                        9.0,
-                        9.0,
+                        22.0,
+                        9.5,
+                        9.5,
                         clr_bg,
                     );
                     self.font.draw_text_centered(
@@ -3494,9 +3562,15 @@ impl IslandWidget {
                     );
                 } else {
                     let row_w = island_w - 56.0;
+                    let row_r = cx + row_w * 0.5;
                     for (idx, n) in self.notif_history.iter().take(3).enumerate() {
                         let ry = island_top + 52.0 + (idx as f32) * 32.0;
-                        let row_bg = if is_light {
+                        let row_hover = self.is_hovered
+                            && (cur_lx - cx).abs() <= row_w * 0.5
+                            && (cur_ly - ry).abs() <= 13.0;
+                        let row_bg = if row_hover {
+                            if is_light { [0, 0, 0, 20] } else { [255, 255, 255, 26] }
+                        } else if is_light {
                             [0, 0, 0, 10]
                         } else {
                             [255, 255, 255, 14]
@@ -3512,10 +3586,10 @@ impl IslandWidget {
                             9.0,
                             row_bg,
                         );
-                        let app_tag = safe_truncate(&n.app, 10);
-                        let summary_txt = safe_truncate(&n.summary, 32);
+                        let app_tag = safe_truncate(&n.app, 9);
+                        let summary_txt = safe_truncate(&n.summary, 24);
                         let line = if summary_txt.is_empty() {
-                            safe_truncate(&n.body, 36)
+                            safe_truncate(&n.body, 28)
                         } else {
                             format!("{} · {}", app_tag, summary_txt)
                         };
@@ -3531,6 +3605,55 @@ impl IslandWidget {
                             col_shadow,
                             FontWeight::Medium,
                         );
+
+                        // Copy pill + Dismiss × pill on right of row
+                        let copy_cx = row_r - 48.0;
+                        let dismiss_cx = row_r - 18.0;
+                        let pill_bg = if is_light { [0, 0, 0, 16] } else { [255, 255, 255, 22] };
+                        UIFont::draw_rounded_rect_fill(
+                            buf,
+                            self.width,
+                            self.height,
+                            copy_cx,
+                            ry,
+                            17.0,
+                            9.0,
+                            7.0,
+                            pill_bg,
+                        );
+                        self.font.draw_text_centered(
+                            buf,
+                            self.width,
+                            self.height,
+                            "Copy",
+                            copy_cx,
+                            ry,
+                            Tokens::TYPE_CAPTION - 1.5,
+                            col_dim,
+                            col_shadow,
+                            FontWeight::SemiBold,
+                        );
+                        UIFont::draw_rounded_rect_fill(
+                            buf,
+                            self.width,
+                            self.height,
+                            dismiss_cx,
+                            ry,
+                            9.0,
+                            9.0,
+                            9.0,
+                            pill_bg,
+                        );
+                        UIFont::draw_close_icon(
+                            buf,
+                            self.width,
+                            self.height,
+                            dismiss_cx,
+                            ry,
+                            3.5,
+                            col_dim,
+                        );
+
                         let secs = n.timestamp.elapsed().as_secs();
                         let age = if secs < 60 {
                             "now".to_string()
@@ -3541,7 +3664,7 @@ impl IslandWidget {
                         };
                         let age_w = self.font.measure_text(
                             &age,
-                            Tokens::TYPE_CAPTION - 1.0,
+                            Tokens::TYPE_CAPTION - 1.5,
                             FontWeight::Medium,
                         );
                         self.font.draw_text_centered_y(
@@ -3549,9 +3672,9 @@ impl IslandWidget {
                             self.width,
                             self.height,
                             &age,
-                            cx + row_w * 0.5 - 12.0 - age_w,
+                            copy_cx - 24.0 - age_w,
                             ry,
-                            Tokens::TYPE_CAPTION - 1.0,
+                            Tokens::TYPE_CAPTION - 1.5,
                             col_dim,
                             col_shadow,
                             FontWeight::Medium,
@@ -3634,17 +3757,17 @@ impl IslandWidget {
                         FontWeight::Medium,
                     );
 
-                    // Right-side metadata: "now" badge pill + "✕" dismiss button
+                    // Right-side actions: "Copy" pill + "✕" dismiss button
                     let right_x = cx + island_w * 0.5 - 34.0;
                     UIFont::draw_rounded_rect_fill(
                         buf,
                         self.width,
                         self.height,
-                        right_x - 38.0,
-                        island_top + 20.0,
-                        18.0,
-                        8.5,
-                        6.0,
+                        right_x - 40.0,
+                        island_cy,
+                        20.0,
+                        11.0,
+                        8.0,
                         if is_light {
                             [0, 0, 0, 16]
                         } else {
@@ -3655,13 +3778,13 @@ impl IslandWidget {
                         buf,
                         self.width,
                         self.height,
-                        "now",
-                        right_x - 38.0,
-                        island_top + 20.0,
+                        "Copy",
+                        right_x - 40.0,
+                        island_cy,
                         10.5,
                         col_dim,
                         [0, 0, 0, 0],
-                        FontWeight::Medium,
+                        FontWeight::SemiBold,
                     );
 
                     // Close/dismiss button circle (r = 13.0)
@@ -3786,7 +3909,7 @@ impl IslandWidget {
                 let cur_lx = self.cursor_pos[0] * (self.width as f32);
                 let cur_ly = self.cursor_pos[1] * (self.height as f32);
 
-                // Top-right header pill: toggle solid dark/light background when above apps
+                // Top-right header pills: DND toggle + App BG toggle
                 let ab_label = if self.app_backdrop_solid {
                     "App BG: Solid"
                 } else {
@@ -3795,6 +3918,41 @@ impl IslandWidget {
                 let ab_cx = cx + island_w * 0.5 - 70.0;
                 let ab_cy = island_top + 22.0;
                 let ab_hw = 44.0;
+                let dnd_cx = ab_cx - 76.0;
+                let dnd_hw = 26.0;
+                let dnd_hover = self.is_hovered
+                    && (cur_lx - dnd_cx).abs() <= dnd_hw
+                    && (cur_ly - ab_cy).abs() <= 11.0;
+                let dnd_bg = if self.dnd_enabled {
+                    if is_light { [0, 0, 0, if dnd_hover { 34 } else { 22 }] } else { [255, 255, 255, if dnd_hover { 48 } else { 32 }] }
+                } else if is_light {
+                    [0, 0, 0, if dnd_hover { 20 } else { 10 }]
+                } else {
+                    [255, 255, 255, if dnd_hover { 28 } else { 14 }]
+                };
+                UIFont::draw_rounded_rect_fill(
+                    buf,
+                    self.width,
+                    self.height,
+                    dnd_cx,
+                    ab_cy,
+                    dnd_hw,
+                    10.5,
+                    10.5,
+                    dnd_bg,
+                );
+                self.font.draw_text_centered(
+                    buf,
+                    self.width,
+                    self.height,
+                    if self.dnd_enabled { "DND" } else { "Alerts" },
+                    dnd_cx,
+                    ab_cy,
+                    Tokens::TYPE_CAPTION - 1.0,
+                    if self.dnd_enabled { col_ink } else { col_dim },
+                    col_shadow,
+                    FontWeight::SemiBold,
+                );
                 let ab_hover = self.is_hovered
                     && (cur_lx - ab_cx).abs() <= ab_hw
                     && (cur_ly - ab_cy).abs() <= 11.0;
@@ -4680,17 +4838,53 @@ impl IslandWidget {
                 }
             }
             IslandMode::Notifications => {
+                let dnd_x = island_cx + island_w * 0.5 - 172.0;
+                let hdr_y = island_top + 22.0;
+                if (lx - dnd_x).abs() <= 30.0 && (ly - hdr_y).abs() <= 12.0 {
+                    self.dnd_enabled = !self.dnd_enabled;
+                    self.needs_redraw = true;
+                    return;
+                }
                 if !self.notif_history.is_empty() {
-                    let clr_x = island_cx + island_w * 0.5 - 116.0;
-                    let clr_y = island_top + 22.0;
-                    if (lx - clr_x).abs() <= 24.0 && (ly - clr_y).abs() <= 12.0 {
+                    let clr_x = island_cx + island_w * 0.5 - 114.0;
+                    if (lx - clr_x).abs() <= 24.0 && (ly - hdr_y).abs() <= 12.0 {
                         self.notif_history.clear();
                         self.needs_redraw = true;
+                        return;
+                    }
+                    let row_w = island_w - 56.0;
+                    let row_r = island_cx + row_w * 0.5;
+                    let copy_cx = row_r - 48.0;
+                    let dismiss_cx = row_r - 18.0;
+                    let count = self.notif_history.len().min(3);
+                    for idx in 0..count {
+                        let ry = island_top + 52.0 + (idx as f32) * 32.0;
+                        if (ly - ry).abs() <= 14.0 && (lx - island_cx).abs() <= row_w * 0.5 {
+                            if (lx - dismiss_cx).abs() <= 12.0 {
+                                self.notif_history.remove(idx);
+                                self.needs_redraw = true;
+                            } else if (lx - copy_cx).abs() <= 20.0 {
+                                Self::copy_notification(&self.notif_history[idx]);
+                                self.needs_redraw = true;
+                            } else {
+                                let app = self.notif_history[idx].app.clone();
+                                Self::focus_or_launch_app(&app);
+                                self.dismiss_with_escape();
+                            }
+                            return;
+                        }
                     }
                 }
             }
             IslandMode::Notification => {
-                self.active_notif = None;
+                let right_x = island_cx + island_w * 0.5 - 34.0;
+                if let Some(notif) = self.active_notif.take() {
+                    if (lx - (right_x - 40.0)).abs() <= 22.0 {
+                        Self::copy_notification(&notif);
+                    } else if (lx - right_x).abs() > 16.0 {
+                        Self::focus_or_launch_app(&notif.app);
+                    }
+                }
                 let return_mode = if self.prev_mode == IslandMode::Hidden {
                     IslandMode::Hidden
                 } else {
@@ -4701,6 +4895,12 @@ impl IslandWidget {
             IslandMode::ControlCenter => {
                 let ab_cx = island_cx + island_w * 0.5 - 70.0;
                 let ab_cy = island_top + 22.0;
+                let dnd_cx = ab_cx - 76.0;
+                if (lx - dnd_cx).abs() <= 28.0 && (ly - ab_cy).abs() <= 13.0 {
+                    self.dnd_enabled = !self.dnd_enabled;
+                    self.needs_redraw = true;
+                    return;
+                }
                 if (lx - ab_cx).abs() <= 46.0 && (ly - ab_cy).abs() <= 13.0 {
                     self.app_backdrop_solid = !self.app_backdrop_solid;
                     self.needs_redraw = true;
