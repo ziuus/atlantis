@@ -1,0 +1,96 @@
+{
+  "animation_speed": 1.0,
+  "blur_radius": 0.0,
+  "clock": {
+    "animation_speed": 1.0,
+    "blur_radius": 0.0,
+    "edge_style": "curved",
+    "enabled": true,
+    "style_mode": 2.0
+  },
+  "dock": {
+    "animation_speed": 1.0,
+    "apps": [
+      {
+        "class": "foot",
+        "command": "foot",
+        "icon": "terminal",
+        "name": "Terminal"
+      },
+      {
+        "class": "brave",
+        "command": "brave",
+        "icon": "browser",
+        "name": "Browser"
+      },
+      {
+        "class": "code",
+        "command": "code",
+        "icon": "editor",
+        "name": "Editor"
+      },
+      {
+        "class": "thunar",
+        "command": "thunar",
+        "icon": "folder",
+        "name": "Files"
+      },
+      {
+        "class": "spotify",
+        "command": "spotify",
+        "icon": "music",
+        "name": "Music"
+      }
+    ],
+    "blur_radius": 0.0,
+    "enabled": true,
+    "hover_to_expand": true,
+    "mode": "floating",
+    "style_mode": 2.0
+  },
+  "island": {
+    "animation_speed": 1.0,
+    "blur_radius": 0.0,
+    "edge_style": "curved",
+    "fillet_radius_compact": 10.0,
+    "fillet_radius_expanded": 24.0,
+    "hover_to_expand": true,
+    "quick_access": [
+      {
+        "command": "foot",
+        "icon": "terminal",
+        "name": "Terminal"
+      },
+      {
+        "command": "brave",
+        "icon": "browser",
+        "name": "Browser"
+      },
+      {
+        "command": "code",
+        "icon": "editor",
+        "name": "Editor"
+      },
+      {
+        "command": "thunar",
+        "icon": "files",
+        "name": "Files"
+      },
+      {
+        "command": "spotify",
+        "icon": "music",
+        "name": "Music"
+      }
+    ],
+    "style_mode": 2.0
+  },
+  "style_mode": 2.0,
+  "theme_mode": 0,
+  "todo": {
+    "animation_speed": 1.0,
+    "blur_radius": 0.0,
+    "edge_style": "straight",
+    "enabled": true,
+    "style_mode": 2.0
+  }
+}

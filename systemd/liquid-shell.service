@@ -1,0 +1,14 @@
+[Unit]
+Description=Liquid Glass Shell
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/home/zius/.local/bin/liquid-shell
+Restart=on-failure
+RestartSec=2
+Environment=WAYLAND_DISPLAY=wayland-1
+
+[Install]
+WantedBy=graphical-session.target
