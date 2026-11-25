@@ -190,6 +190,57 @@ fn draw_app_icon(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HudKind {
+    Volume,
+    Brightness,
+}
+
+#[derive(Debug, Clone)]
+pub struct IslandHud {
+    pub kind: HudKind,
+    pub value: f32,
+    pub text: String,
+    pub expires: Instant,
+}
+
+pub fn query_wpctl_volume() -> (u32, bool) {
+    if let Ok(out) = Command::new("wpctl")
+        .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
+        .output()
+    {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            let muted = s.contains("[MUTED]");
+            for part in s.split_whitespace() {
+                if let Ok(v) = part.parse::<f32>() {
+                    let pct = ((v * 100.0).round() as u32).min(150);
+                    return (pct, muted);
+                }
+            }
+        }
+    }
+    (50, false)
+}
+
+pub fn query_brightness() -> u32 {
+    if let Ok(out) = Command::new("brightnessctl").args(["-m"]).output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Some(line) = s.lines().next() {
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() >= 4 {
+                    let pct_str = parts[3].trim_end_matches('%');
+                    if let Ok(p) = pct_str.parse::<u32>() {
+                        return p.min(100);
+                    }
+                }
+            }
+        }
+    }
+    100
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IslandMode {
     Hidden,
     CompactPill,
@@ -231,6 +282,10 @@ pub struct SysStats {
     pub bat_charging: bool,
     pub uptime_hrs: u32,
     pub uptime_mins: u32,
+    pub vol_pct: u32,
+    pub vol_muted: bool,
+    pub brightness_pct: u32,
+    pub is_online: bool,
     prev_idle: u64,
     prev_total: u64,
     last_poll: Instant,
@@ -246,6 +301,10 @@ impl SysStats {
             bat_charging: false,
             uptime_hrs: 0,
             uptime_mins: 0,
+            vol_pct: 30,
+            vol_muted: false,
+            brightness_pct: 50,
+            is_online: true,
             prev_idle: 0,
             prev_total: 0,
             last_poll: Instant::now() - Duration::from_secs(5),
@@ -265,6 +324,19 @@ impl SysStats {
             return;
         }
         self.last_poll = Instant::now();
+
+        // Sample volume & brightness
+        let (v, muted) = query_wpctl_volume();
+        self.vol_pct = v;
+        self.vol_muted = muted;
+        self.brightness_pct = query_brightness();
+
+        // Sample network online state
+        self.is_online = std::path::Path::new("/sys/class/net/wlan0/carrier").exists()
+            || std::path::Path::new("/sys/class/net/eth0/carrier").exists()
+            || std::fs::read_to_string("/sys/class/net/wlan0/operstate")
+                .map(|s| s.trim() == "up")
+                .unwrap_or(false);
 
         // Sample CPU from /proc/stat
         if let Ok(s) = std::fs::read_to_string("/proc/stat") {
@@ -362,6 +434,19 @@ pub enum IslandIpcEvent {
     ToggleHoverExpand,
     SetHoverExpand(bool),
     ReloadConfig,
+    VolumeUp,
+    VolumeDown,
+    VolumeSet(u32),
+    VolumeToggleMute,
+    BrightnessUp,
+    BrightnessDown,
+    BrightnessSet(u32),
+    SwitchAudioSink,
+    Toast {
+        app: String,
+        title: String,
+        body: String,
+    },
 }
 
 pub struct WaylandWindow {
@@ -468,9 +553,11 @@ pub struct IslandWidget {
     pub blur_radius: f32,
     pub anim_speed: f32,
     pub hover_to_expand: bool,
+    pub auto_hide: bool,
     pub hover_dwell_start: Option<Instant>,
     pub hot_edge_dwell_start: Option<Instant>,
     pub needs_input_region_update: bool,
+    pub hud: Option<IslandHud>,
 }
 
 impl IslandWidget {
@@ -577,6 +664,181 @@ impl IslandWidget {
             }
         }
         let _ = Command::new("pavucontrol").spawn();
+    }
+
+    pub fn trigger_hud(&mut self, kind: HudKind, val: f32, text: String) {
+        self.hud = Some(IslandHud {
+            kind,
+            value: val.clamp(0.0, 1.5),
+            text,
+            expires: Instant::now() + Duration::from_millis(2500),
+        });
+        self.target_w = 320.0;
+        self.target_h = 44.0;
+        self.target_y = self.dock_mode.dock_y();
+        self.target_alpha = 1.0;
+        self.animating = true;
+        self.needs_redraw = true;
+        self.needs_input_region_update = true;
+    }
+
+    pub fn draw_speaker_icon(
+        buf: &mut [u8],
+        width: u32,
+        height: u32,
+        cx: f32,
+        cy: f32,
+        col: [u8; 4],
+        has_sound: bool,
+    ) {
+        UIFont::draw_rounded_rect_fill(buf, width, height, cx - 4.0, cy, 2.0, 3.0, 1.0, col);
+        UIFont::draw_rounded_rect_fill(buf, width, height, cx - 1.0, cy, 1.0, 4.5, 0.5, col);
+        UIFont::draw_rounded_rect_fill(buf, width, height, cx + 1.0, cy, 1.0, 6.0, 0.5, col);
+        if has_sound {
+            UIFont::draw_rounded_rect_fill(buf, width, height, cx + 4.5, cy, 0.8, 3.5, 0.5, col);
+            UIFont::draw_rounded_rect_fill(buf, width, height, cx + 7.5, cy, 0.8, 6.0, 0.5, col);
+        } else {
+            UIFont::draw_rounded_rect_fill(
+                buf,
+                width,
+                height,
+                cx + 5.0,
+                cy,
+                0.8,
+                4.0,
+                0.5,
+                [255, 69, 58, 255],
+            );
+        }
+    }
+
+    pub fn draw_brightness_icon(
+        buf: &mut [u8],
+        width: u32,
+        height: u32,
+        cx: f32,
+        cy: f32,
+        col: [u8; 4],
+    ) {
+        UIFont::draw_rounded_rect_fill(buf, width, height, cx, cy, 4.0, 4.0, 4.0, col);
+        UIFont::draw_rounded_rect_fill(buf, width, height, cx, cy - 7.0, 1.0, 1.5, 0.5, col);
+        UIFont::draw_rounded_rect_fill(buf, width, height, cx, cy + 7.0, 1.0, 1.5, 0.5, col);
+        UIFont::draw_rounded_rect_fill(buf, width, height, cx - 7.0, cy, 1.5, 1.0, 0.5, col);
+        UIFont::draw_rounded_rect_fill(buf, width, height, cx + 7.0, cy, 1.5, 1.0, 0.5, col);
+    }
+
+    pub fn render_hud_overlay(
+        &self,
+        buf: &mut [u8],
+        hud: &IslandHud,
+        is_light: bool,
+        cx: f32,
+        cy: f32,
+        width: f32,
+    ) {
+        let col_ink = if is_light {
+            [20, 24, 34, 255]
+        } else {
+            [245, 248, 255, 255]
+        };
+        let col_shadow = if is_light {
+            [255, 255, 255, 60]
+        } else {
+            [0, 0, 0, 120]
+        };
+
+        let icon_x = cx - width * 0.5 + 24.0;
+        match hud.kind {
+            HudKind::Volume => {
+                Self::draw_speaker_icon(
+                    buf,
+                    self.width,
+                    self.height,
+                    icon_x,
+                    cy,
+                    col_ink,
+                    hud.value > 0.01,
+                );
+            }
+            HudKind::Brightness => {
+                Self::draw_brightness_icon(buf, self.width, self.height, icon_x, cy, col_ink);
+            }
+        }
+
+        let label_x = icon_x + 18.0;
+        let label = match hud.kind {
+            HudKind::Volume => format!("Volume {}", hud.text),
+            HudKind::Brightness => format!("Brightness {}", hud.text),
+        };
+        self.font.draw_text_centered_y(
+            buf,
+            self.width,
+            self.height,
+            &label,
+            label_x,
+            cy,
+            Tokens::TYPE_BODY_SM,
+            col_ink,
+            col_shadow,
+            FontWeight::Bold,
+        );
+
+        let bar_w = 110.0;
+        let bar_cx = cx + width * 0.5 - 20.0 - bar_w * 0.5;
+        let track_bg = if is_light {
+            [0, 0, 0, 30]
+        } else {
+            [255, 255, 255, 45]
+        };
+        UIFont::draw_rounded_rect_fill(
+            buf,
+            self.width,
+            self.height,
+            bar_cx,
+            cy,
+            bar_w * 0.5,
+            3.0,
+            3.0,
+            track_bg,
+        );
+
+        let fill_w = (bar_w * hud.value.clamp(0.0, 1.0)).max(3.0);
+        let fill_cx = bar_cx - bar_w * 0.5 + fill_w * 0.5;
+        let fill_col = if is_light {
+            match hud.kind {
+                HudKind::Volume => [0, 122, 255, 240],
+                HudKind::Brightness => [255, 149, 0, 240],
+            }
+        } else {
+            match hud.kind {
+                HudKind::Volume => [52, 199, 89, 250],
+                HudKind::Brightness => [255, 214, 10, 250],
+            }
+        };
+        UIFont::draw_rounded_rect_fill(
+            buf,
+            self.width,
+            self.height,
+            fill_cx,
+            cy,
+            fill_w * 0.5,
+            3.0,
+            3.0,
+            fill_col,
+        );
+
+        let knob_x = bar_cx - bar_w * 0.5 + fill_w;
+        UIFont::draw_rounded_rect_fill(
+            buf,
+            self.width,
+            self.height,
+            knob_x,
+            cy,
+            4.0,
+            4.0,
+            4.0,
+            col_ink,
+        );
     }
     pub fn new<D>(
         qh: &QueueHandle<D>,
@@ -723,9 +985,11 @@ impl IslandWidget {
             blur_radius,
             anim_speed,
             hover_to_expand,
+            auto_hide: false,
             hover_dwell_start: None,
             hot_edge_dwell_start: None,
             needs_input_region_update: true,
+            hud: None,
         };
         widget.check_window_overlap();
         if widget.mode == IslandMode::Hidden {
@@ -751,21 +1015,16 @@ impl IslandWidget {
             return false;
         }
         let island_cx = (self.width as f32) * 0.5;
-        let is_compact = self.mode == IslandMode::CompactPill;
-        let half_w = if is_compact {
-            Tokens::ISLAND_COMPACT_W * 0.5
+        let (half_w, h, top) = if self.hud.is_some() {
+            (160.0, 44.0, self.target_y)
+        } else if self.mode == IslandMode::CompactPill {
+            (
+                Tokens::ISLAND_COMPACT_W * 0.5,
+                Tokens::ISLAND_COMPACT_H,
+                self.target_y,
+            )
         } else {
-            self.target_w * 0.5
-        };
-        let h = if is_compact {
-            Tokens::ISLAND_COMPACT_H
-        } else {
-            self.target_h
-        };
-        let top = if is_compact {
-            self.target_y
-        } else {
-            self.current_y
+            (self.target_w * 0.5, self.target_h, self.current_y)
         };
 
         // Cover strictly the island bounds without bleeding into adjacent apps
@@ -779,18 +1038,25 @@ impl IslandWidget {
         self.needs_input_region_update = false;
         let region = compositor.wl_compositor().create_region(qh, ());
         if self.mode != IslandMode::Hidden && self.current_alpha > 0.01 {
-            match self.mode {
-                IslandMode::CompactPill => {
-                    let pill_w = Tokens::ISLAND_COMPACT_W as i32;
-                    let pill_h = (self.target_y + Tokens::ISLAND_COMPACT_H) as i32;
-                    let pill_x = (self.width as i32 - pill_w) / 2;
-                    region.add(pill_x, 0, pill_w, pill_h);
-                }
-                _ => {
-                    let card_w = self.target_w as i32;
-                    let card_h = (self.target_y + self.target_h) as i32;
-                    let card_x = (self.width as i32 - card_w) / 2;
-                    region.add(card_x, 0, card_w, card_h);
+            if self.hud.is_some() {
+                let hud_w = 320;
+                let hud_h = (self.target_y + 44.0) as i32;
+                let hud_x = (self.width as i32 - hud_w) / 2;
+                region.add(hud_x, 0, hud_w, hud_h);
+            } else {
+                match self.mode {
+                    IslandMode::CompactPill => {
+                        let pill_w = Tokens::ISLAND_COMPACT_W as i32;
+                        let pill_h = (self.target_y + Tokens::ISLAND_COMPACT_H) as i32;
+                        let pill_x = (self.width as i32 - pill_w) / 2;
+                        region.add(pill_x, 0, pill_w, pill_h);
+                    }
+                    _ => {
+                        let card_w = self.target_w as i32;
+                        let card_h = (self.target_y + self.target_h) as i32;
+                        let card_x = (self.width as i32 - card_w) / 2;
+                        region.add(card_x, 0, card_w, card_h);
+                    }
                 }
             }
         } else {
@@ -1037,12 +1303,22 @@ impl IslandWidget {
                     0.0
                 };
 
-                // Wheel scroll on CompactPill adjusts volume via wpctl with immediate feedback
-                if self.mode == IslandMode::CompactPill && delta.abs() > 0.1 {
+                // Wheel scroll on CompactPill adjusts volume via wpctl and triggers interactive HUD popup
+                if (self.mode == IslandMode::CompactPill || self.hud.is_some()) && delta.abs() > 0.1
+                {
                     let step = if delta > 0.0 { "5%-" } else { "5%+" };
                     let _ = Command::new("wpctl")
                         .args(["set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", step])
-                        .spawn();
+                        .status();
+                    let (vol, muted) = query_wpctl_volume();
+                    self.sys_stats.vol_pct = vol;
+                    self.sys_stats.vol_muted = muted;
+                    let text = if muted {
+                        "Muted".to_string()
+                    } else {
+                        format!("{}%", vol)
+                    };
+                    self.trigger_hud(HudKind::Volume, vol as f32 / 100.0, text);
                     return true;
                 }
 
@@ -1486,6 +1762,95 @@ impl IslandWidget {
                     self.save_config();
                 }
                 IslandIpcEvent::ReloadConfig => self.reload_config(),
+                IslandIpcEvent::VolumeUp => {
+                    let _ = Command::new("wpctl")
+                        .args(["set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", "5%+"])
+                        .status();
+                    let (vol, muted) = query_wpctl_volume();
+                    self.sys_stats.vol_pct = vol;
+                    self.sys_stats.vol_muted = muted;
+                    let text = if muted {
+                        "Muted".into()
+                    } else {
+                        format!("{}%", vol)
+                    };
+                    self.trigger_hud(HudKind::Volume, vol as f32 / 100.0, text);
+                }
+                IslandIpcEvent::VolumeDown => {
+                    let _ = Command::new("wpctl")
+                        .args(["set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", "5%-"])
+                        .status();
+                    let (vol, muted) = query_wpctl_volume();
+                    self.sys_stats.vol_pct = vol;
+                    self.sys_stats.vol_muted = muted;
+                    let text = if muted {
+                        "Muted".into()
+                    } else {
+                        format!("{}%", vol)
+                    };
+                    self.trigger_hud(HudKind::Volume, vol as f32 / 100.0, text);
+                }
+                IslandIpcEvent::VolumeSet(pct) => {
+                    let val_f = pct as f32 / 100.0;
+                    let _ = Command::new("wpctl")
+                        .args([
+                            "set-volume",
+                            "-l",
+                            "1.5",
+                            "@DEFAULT_AUDIO_SINK@",
+                            &format!("{:.2}", val_f),
+                        ])
+                        .status();
+                    let (vol, muted) = query_wpctl_volume();
+                    self.sys_stats.vol_pct = vol;
+                    self.sys_stats.vol_muted = muted;
+                    let text = if muted {
+                        "Muted".into()
+                    } else {
+                        format!("{}%", vol)
+                    };
+                    self.trigger_hud(HudKind::Volume, vol as f32 / 100.0, text);
+                }
+                IslandIpcEvent::VolumeToggleMute => {
+                    let _ = Command::new("wpctl")
+                        .args(["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
+                        .status();
+                    let (vol, muted) = query_wpctl_volume();
+                    self.sys_stats.vol_pct = vol;
+                    self.sys_stats.vol_muted = muted;
+                    let text = if muted {
+                        "Muted".into()
+                    } else {
+                        format!("{}%", vol)
+                    };
+                    self.trigger_hud(HudKind::Volume, vol as f32 / 100.0, text);
+                }
+                IslandIpcEvent::BrightnessUp => {
+                    let _ = Command::new("brightnessctl").args(["set", "5%+"]).status();
+                    let bri = query_brightness();
+                    self.sys_stats.brightness_pct = bri;
+                    self.trigger_hud(HudKind::Brightness, bri as f32 / 100.0, format!("{}%", bri));
+                }
+                IslandIpcEvent::BrightnessDown => {
+                    let _ = Command::new("brightnessctl").args(["set", "5%-"]).status();
+                    let bri = query_brightness();
+                    self.sys_stats.brightness_pct = bri;
+                    self.trigger_hud(HudKind::Brightness, bri as f32 / 100.0, format!("{}%", bri));
+                }
+                IslandIpcEvent::BrightnessSet(pct) => {
+                    let _ = Command::new("brightnessctl")
+                        .args(["set", &format!("{}%", pct)])
+                        .status();
+                    let bri = query_brightness();
+                    self.sys_stats.brightness_pct = bri;
+                    self.trigger_hud(HudKind::Brightness, bri as f32 / 100.0, format!("{}%", bri));
+                }
+                IslandIpcEvent::SwitchAudioSink => {
+                    self.toggle_audio_sink();
+                }
+                IslandIpcEvent::Toast { app, title, body } => {
+                    self.show_toast(&app, &title, &body);
+                }
             }
         }
         (
@@ -1609,21 +1974,58 @@ impl IslandWidget {
                 (self.music.elapsed_sec / self.music.duration_sec).clamp(0.0, 1.0);
         }
 
+        // Active HUD timeout check
+        if let Some(ref hud) = self.hud {
+            if Instant::now() < hud.expires {
+                self.target_w = 320.0;
+                self.target_h = 44.0;
+                self.target_y = self.dock_mode.dock_y();
+                self.target_alpha = 1.0;
+            } else {
+                self.hud = None;
+                self.target_w = match self.mode {
+                    IslandMode::CompactPill => Tokens::ISLAND_COMPACT_W,
+                    IslandMode::Notification => 420.0,
+                    IslandMode::Hidden => 160.0,
+                    _ => Tokens::ISLAND_EXPANDED_W,
+                };
+                self.target_h = match self.mode {
+                    IslandMode::CompactPill => Tokens::ISLAND_COMPACT_H,
+                    IslandMode::Notification => 76.0,
+                    IslandMode::Hidden => 10.0,
+                    _ => Tokens::ISLAND_EXPANDED_H,
+                };
+                self.target_y = self.dock_mode.dock_y();
+                self.animating = true;
+                self.needs_redraw = true;
+                self.needs_input_region_update = true;
+            }
+        }
+
         // Hover to expand dwell trigger (crisp 70ms responsiveness)
-        if self.hover_to_expand && self.is_hovered && self.mode == IslandMode::CompactPill {
+        if self.hover_to_expand
+            && self.is_hovered
+            && self.mode == IslandMode::CompactPill
+            && self.hud.is_none()
+        {
             if let Some(start) = self.hover_dwell_start {
                 if start.elapsed() >= Duration::from_millis(70) {
-                    self.set_mode(IslandMode::MusicExpanded);
+                    if self.music.is_playing {
+                        self.set_mode(IslandMode::MusicExpanded);
+                    } else {
+                        self.set_mode(IslandMode::SystemOverview);
+                    }
                     self.hover_dwell_start = None;
                 }
             }
         }
 
-        // When expanded, retract back after normal 4s timeout of no user interaction
-        let retract_timeout = Duration::from_millis(4000);
+        // When expanded, retract back after generous 8s timeout of no user interaction
+        let retract_timeout = Duration::from_millis(8000);
 
         if !self.is_hovered
             && !self.is_pressed
+            && self.hud.is_none()
             && matches!(
                 self.mode,
                 IslandMode::MusicExpanded
@@ -1659,6 +2061,7 @@ impl IslandWidget {
             || (self.music.is_playing && self.mode != IslandMode::Hidden)
             || self.mode == IslandMode::Notification
             || (self.hover_dwell_start.is_some() && self.mode == IslandMode::CompactPill)
+            || self.hud.is_some()
             || hold_active;
         self.animating = is_active;
         is_active
@@ -1781,6 +2184,13 @@ impl IslandWidget {
     }
 
     pub fn check_window_overlap(&mut self) {
+        if !self.auto_hide {
+            if self.mode == IslandMode::Hidden {
+                self.set_mode(IslandMode::CompactPill);
+            }
+            return;
+        }
+
         // Never auto-collapse if user is actively interacting or looking at an expanded page!
         if self.is_hovered
             || self.is_pressed
@@ -2109,6 +2519,12 @@ impl IslandWidget {
         let island_h = self.current_h;
         let island_cy = island_top + island_h * 0.5;
 
+        if let Some(ref hud) = self.hud {
+            self.render_hud_overlay(buf, hud, is_light, island_cx, island_cy, island_w);
+            self.overlay_buffer = overlay_vec;
+            return;
+        }
+
         match self.mode {
             IslandMode::CompactPill => {
                 let disc_cx = island_cx - island_w * 0.5 + 22.0;
@@ -2188,14 +2604,20 @@ impl IslandWidget {
                         FontWeight::Bold,
                     );
 
-                    // Right: pocket-dots Network status dot + Crisp Live Battery Indicator
+                    // Right: [Volume Speaker] [Network status dot] [Live Battery Indicator]
                     let dot_x = right_x - 18.0;
-                    let is_online = std::path::Path::new("/sys/class/net/wlan0/carrier").exists()
-                        || std::path::Path::new("/sys/class/net/eth0/carrier").exists()
-                        || std::fs::read_to_string("/sys/class/net/wlan0/operstate")
-                            .map(|s| s.trim() == "up")
-                            .unwrap_or(false);
-                    let net_col = if is_online {
+                    let spk_x = dot_x - 18.0;
+                    Self::draw_speaker_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        spk_x,
+                        island_cy,
+                        col_ink,
+                        !self.sys_stats.vol_muted,
+                    );
+
+                    let net_col = if self.sys_stats.is_online {
                         [52, 199, 89, 230] // Emerald Green online dot
                     } else {
                         [255, 159, 10, 230] // Amber offline dot
@@ -3270,6 +3692,12 @@ impl IslandWidget {
                 || ((lx - replay_cx).powi(2) + (ly - ctrl_y).powi(2)).sqrt() <= 20.0
                 || ((lx - output_cx).powi(2) + (ly - ctrl_y).powi(2)).sqrt() <= 20.0);
 
+        if self.hud.is_some() {
+            self.hud = None;
+            self.set_mode(self.mode);
+            return;
+        }
+
         // Double-click detection: collapses expanded island or expands compact pill
         if !is_track_nav {
             let click_dt = self.last_click_time.elapsed();
@@ -3280,7 +3708,11 @@ impl IslandWidget {
             if click_dt < Duration::from_millis(500) && click_dist < 45.0 {
                 self.last_click_time = Instant::now() - Duration::from_secs(10);
                 if self.mode == IslandMode::CompactPill {
-                    self.set_mode(IslandMode::MusicExpanded);
+                    if self.music.is_playing {
+                        self.set_mode(IslandMode::MusicExpanded);
+                    } else {
+                        self.set_mode(IslandMode::SystemOverview);
+                    }
                 } else {
                     self.set_mode(IslandMode::CompactPill);
                 }
@@ -3318,8 +3750,10 @@ impl IslandWidget {
                 if d_disc <= 18.0 && self.music.is_playing {
                     let _ = Command::new("playerctl").args(["play-pause"]).spawn();
                     self.music.is_playing = !self.music.is_playing;
-                } else {
+                } else if self.music.is_playing {
                     self.set_mode(IslandMode::MusicExpanded);
+                } else {
+                    self.set_mode(IslandMode::SystemOverview);
                 }
             }
             IslandMode::MusicExpanded => {
@@ -3737,6 +4171,74 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
                             || trimmed == "hover_to_expand 0"
                         {
                             send_evt(IslandIpcEvent::SetHoverExpand(false));
+                        } else if trimmed == "vol_up"
+                            || trimmed == "volume_up"
+                            || trimmed == "vol+"
+                            || trimmed == "volume+"
+                            || trimmed == "volume-up"
+                        {
+                            send_evt(IslandIpcEvent::VolumeUp);
+                        } else if trimmed == "vol_down"
+                            || trimmed == "volume_down"
+                            || trimmed == "vol-"
+                            || trimmed == "volume-"
+                            || trimmed == "volume-down"
+                        {
+                            send_evt(IslandIpcEvent::VolumeDown);
+                        } else if trimmed.starts_with("vol ")
+                            || trimmed.starts_with("volume ")
+                            || trimmed.starts_with("volume-set ")
+                        {
+                            if let Some(arg) = trimmed.split_whitespace().nth(1) {
+                                let clean = arg.trim_end_matches('%');
+                                if let Ok(pct) = clean.parse::<u32>() {
+                                    send_evt(IslandIpcEvent::VolumeSet(pct));
+                                }
+                            }
+                        } else if trimmed == "mute"
+                            || trimmed == "toggle_mute"
+                            || trimmed == "vol_mute"
+                        {
+                            send_evt(IslandIpcEvent::VolumeToggleMute);
+                        } else if trimmed == "bri_up"
+                            || trimmed == "brightness_up"
+                            || trimmed == "bri+"
+                            || trimmed == "brightness+"
+                            || trimmed == "brightness-up"
+                        {
+                            send_evt(IslandIpcEvent::BrightnessUp);
+                        } else if trimmed == "bri_down"
+                            || trimmed == "brightness_down"
+                            || trimmed == "bri-"
+                            || trimmed == "brightness-"
+                            || trimmed == "brightness-down"
+                        {
+                            send_evt(IslandIpcEvent::BrightnessDown);
+                        } else if trimmed.starts_with("bri ")
+                            || trimmed.starts_with("brightness ")
+                            || trimmed.starts_with("brightness-set ")
+                        {
+                            if let Some(arg) = trimmed.split_whitespace().nth(1) {
+                                let clean = arg.trim_end_matches('%');
+                                if let Ok(pct) = clean.parse::<u32>() {
+                                    send_evt(IslandIpcEvent::BrightnessSet(pct));
+                                }
+                            }
+                        } else if trimmed == "output"
+                            || trimmed == "switch_audio"
+                            || trimmed == "toggle_output"
+                            || trimmed == "sink"
+                        {
+                            send_evt(IslandIpcEvent::SwitchAudioSink);
+                        } else if trimmed.starts_with("toast ") || trimmed.starts_with("notify ") {
+                            let parts: Vec<&str> = trimmed.splitn(3, ' ').collect();
+                            let title = parts.get(1).unwrap_or(&"Atlantis").to_string();
+                            let body = parts.get(2).unwrap_or(&"").to_string();
+                            send_evt(IslandIpcEvent::Toast {
+                                app: "Atlantis".into(),
+                                title,
+                                body,
+                            });
                         } else if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
                             if val.get("type").and_then(|t| t.as_str()) == Some("notification") {
                                 let app = val

@@ -10,9 +10,15 @@
 
 <br />
 
-<img src="assets/hero.png" alt="Atlantis Liquid Glass Desktop Environment" width="100%" />
+<img src="assets/desktop-showcase.png" alt="Atlantis Liquid Glass Desktop Showcase" width="100%" />
+
+<br />
 
 *Complete physical optical glass desktop suite with Snell refraction, Cauchy chromatic dispersion, tactile spring kinetics, and dynamic ambient lighting.*
+
+<br />
+
+<img src="assets/hero.png" alt="Atlantis Dynamic Island and Glass Elements" width="100%" />
 
 <br />
 
@@ -24,13 +30,14 @@
 
 1. **Liquid Dynamic Island**:
    - Floating compact capsule expanding on hover or click with fluid RK4 spring physics.
-   - Interactive media player with spinning vinyl disc, progress scrub bar, and animated equalizer.
-   - Quick PipeWire audio sink switcher (`wpctl`) with live device toast notification.
-   - Wheel scroll volume control directly over the compact pill.
-   - Dynamic status dots: live network connectivity dot (emerald online, amber offline) and battery level.
-   - Hardware metrics & system overview (CPU, RAM, Uptime, Battery) with one-click `btop` launcher.
-   - Quick Access application drawer with app launchers.
-   - Safe Power menu with hold-to-confirm reboot and shutdown actions.
+   - **Hardware HUD & Sliders**: Real-time curved glass volume & brightness popups (`wpctl` & `brightnessctl`) with speaker icon, percentage badge, and smooth glow rails.
+   - **Wheel-Scroll Volume**: Mouse wheel scroll directly over the compact capsule to instantly adjust audio volume with live HUD feedback.
+   - **Interactive Media Player**: Spinning vinyl disc, progress scrub bar, animated equalizer, and playback controls.
+   - **Audio Output Switcher**: Instant PipeWire sink cycle (`wpctl`) with live device toast notification.
+   - **Dynamic Status Metrics**: Real-time network connectivity indicator (emerald online, amber offline) and battery level.
+   - **System Overview**: Live CPU, RAM, Uptime, Battery telemetry with one-click `btop` launcher.
+   - **Quick Access Drawer**: Instant application launcher grid.
+   - **Safe Power Menu**: Hold-to-confirm reboot, shutdown, suspend, and lock actions.
 
 2. **Center Hero Clock**:
    - Giant 3D liquid glass numerals rendered via pure physical Snell refraction.
@@ -75,11 +82,23 @@ makepkg -si
 Control the desktop from your keyboard shortcuts, Hyprland binds, or terminal:
 
 ```bash
+# Navigation & Modes
 atlantis-ctl toggle           # Toggle island visibility
 atlantis-ctl music            # Jump directly to Music player
 atlantis-ctl system           # Jump to System Overview
 atlantis-ctl apps             # Jump to Quick Access app drawer
 atlantis-ctl power            # Jump to Power menu
+
+# Hardware HUD & Audio
+atlantis-ctl volume-up        # Increase volume & trigger glass HUD
+atlantis-ctl volume-down      # Decrease volume & trigger glass HUD
+atlantis-ctl volume 70        # Set volume to exact percentage
+atlantis-ctl mute             # Toggle mute state
+atlantis-ctl sink             # Switch audio output device
+atlantis-ctl brightness-up    # Increase display brightness
+atlantis-ctl brightness-down  # Decrease display brightness
+
+# Aesthetics & Theme
 atlantis-ctl theme cycle      # Cycle Auto -> Dark -> Light
 atlantis-ctl style cycle      # Cycle Obsidian -> Frosted -> Liquid Glass
 ```

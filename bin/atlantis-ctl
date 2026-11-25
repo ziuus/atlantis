@@ -24,6 +24,17 @@ Navigation & Modes:
   system / sys        Expand system monitor & stats
   power               Expand power menu
 
+Hardware HUD & Audio:
+  volume-up / vol_up  Increase volume (+5%) and show glass HUD
+  volume-down / vol_down Decrease volume (-5%) and show glass HUD
+  volume <pct>        Set volume to specific percentage (e.g. volume 65)
+  mute                Toggle audio mute state
+  output / sink       Cycle PipeWire audio output sink
+  brightness-up       Increase screen brightness (+5%) and show glass HUD
+  brightness-down     Decrease screen brightness (-5%) and show glass HUD
+  brightness <pct>    Set screen brightness percentage (e.g. brightness 80)
+  toast <msg>         Show glass toast notification (e.g. toast "Sync Complete")
+
 Widget Toggles:
   clock               Toggle digital/analog clock widget
   tasks / todo        Toggle task agenda widget
