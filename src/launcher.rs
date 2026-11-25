@@ -1,6 +1,6 @@
 //! Atlantis Liquid Glass Launcher — Spotlight / Raycast-grade Wayland app launcher.
-//! Scans `.desktop` entries, ranks by launch frequency, evaluates live math expressions,
-//! and supports `>` system actions with pure Liquid Glass rendering.
+//! Features a 2-card floating Liquid Glass spatial layout, real `.desktop` PNG app icons
+//! with Lucide vector fallbacks, live inspector pane, math evaluator, and `>` system actions.
 
 use glass_core::animation::{Spring, SpringParams};
 use glass_core::font::{FontWeight, UIFont};
@@ -21,6 +21,7 @@ use smithay_client_toolkit::shell::wlr_layer::{
 };
 use smithay_client_toolkit::shell::WaylandSurface;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
@@ -29,9 +30,17 @@ use wayland_client::protocol::{wl_region, wl_surface};
 use wayland_client::{Dispatch, Proxy, QueueHandle};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 
-pub const LAUNCHER_W: u32 = 620;
-pub const LAUNCHER_H: u32 = 430;
+pub const LAUNCHER_W: u32 = 680;
+pub const LAUNCHER_H: u32 = 490;
+const SEARCH_CARD_H: f32 = 64.0;
+const CARD_GAP: f32 = 12.0;
+const MAIN_CARD_Y: f32 = SEARCH_CARD_H + CARD_GAP; // 76.0
+const LIST_TOP_Y: f32 = MAIN_CARD_Y + 18.0; // 94.0
+const ROW_H: f32 = 56.0;
+const DIVIDER_X: f32 = 414.0;
 const MAX_VISIBLE_ROWS: usize = 6;
+const SMALL_ICON_SZ: u32 = 28;
+const LARGE_ICON_SZ: u32 = 52;
 
 pub struct WaylandWindow {
     pub surface: wl_surface::WlSurface,
@@ -62,6 +71,7 @@ pub struct DesktopApp {
     pub name: String,
     pub exec: String,
     pub comment: String,
+    pub icon: String,
     pub is_action: bool,
 }
 
@@ -69,6 +79,11 @@ pub struct DesktopApp {
 enum SearchResult {
     Calc { expr: String, value: String },
     App(DesktopApp),
+}
+
+struct CachedIcon {
+    small: Vec<u8>, // 28x28 RGBA
+    large: Vec<u8>, // 52x52 RGBA
 }
 
 pub struct LauncherWidget {
@@ -103,6 +118,7 @@ pub struct LauncherWidget {
     pub apps: Vec<DesktopApp>,
     pub freq: HashMap<String, u32>,
     filtered: Vec<SearchResult>,
+    icon_cache: HashMap<String, Option<CachedIcon>>,
     pub opened_at: Instant,
 }
 
@@ -121,7 +137,7 @@ impl LauncherWidget {
         let width = LAUNCHER_W;
         let height = LAUNCHER_H;
         let pos_x = (1920 - width as i32) / 2;
-        let pos_y = 220;
+        let pos_y = 200;
 
         let surface = compositor.create_surface(qh);
         let layer_surface = layer_shell.create_layer_surface(
@@ -183,6 +199,7 @@ impl LauncherWidget {
             apps,
             freq,
             filtered: Vec::new(),
+            icon_cache: HashMap::new(),
             opened_at: Instant::now(),
         };
         w.refilter();
@@ -327,7 +344,7 @@ impl LauncherWidget {
 
     fn save_freq(&self) {
         let path = Self::freq_path();
-        if let Some(parent) = std::path::Path::new(&path).parent() {
+        if let Some(parent) = Path::new(&path).parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         if let Ok(json) = serde_json::to_string(&self.freq) {
@@ -369,6 +386,7 @@ impl LauncherWidget {
         let mut name = None;
         let mut exec = None;
         let mut comment = String::new();
+        let mut icon = String::new();
         let mut no_display = false;
         let mut app_type = String::new();
 
@@ -389,7 +407,6 @@ impl LauncherWidget {
                     }
                     "Name" if name.is_none() => name = Some(v.trim().to_string()),
                     "Exec" if exec.is_none() => {
-                        // Strip desktop field codes (%u, %U, %f, %F, etc.)
                         let cleaned: Vec<&str> = v
                             .split_whitespace()
                             .filter(|tok| !tok.starts_with('%'))
@@ -398,6 +415,7 @@ impl LauncherWidget {
                             exec = Some(cleaned.join(" "));
                         }
                     }
+                    "Icon" if icon.is_empty() => icon = v.trim().to_string(),
                     "Comment" if comment.is_empty() => comment = v.trim().to_string(),
                     _ => {}
                 }
@@ -411,8 +429,234 @@ impl LauncherWidget {
             name: name?,
             exec: exec?,
             comment,
+            icon,
             is_action: false,
         })
+    }
+
+    fn find_icon_png(icon_name: &str) -> Option<PathBuf> {
+        if icon_name.is_empty() {
+            return None;
+        }
+        let p = Path::new(icon_name);
+        if p.is_absolute() && p.exists() {
+            let ext = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if ext == "png" || ext == "jpg" || ext == "jpeg" {
+                return Some(p.to_path_buf());
+            }
+            return None;
+        }
+
+        let home = std::env::var("HOME").unwrap_or_default();
+        let bases = [
+            format!("{}/.local/share/icons", home),
+            "/usr/share/icons".to_string(),
+        ];
+        let themes = ["hicolor", "Papirus", "Papirus-Dark", "Adwaita", "breeze"];
+        let sizes = ["64x64", "48x48", "128x128", "256x256", "32x32"];
+
+        for base in &bases {
+            for theme in &themes {
+                for sz in &sizes {
+                    let cand = PathBuf::from(format!(
+                        "{}/{}/{}/apps/{}.png",
+                        base, theme, sz, icon_name
+                    ));
+                    if cand.exists() {
+                        return Some(cand);
+                    }
+                }
+            }
+        }
+
+        let pix = PathBuf::from(format!("/usr/share/pixmaps/{}.png", icon_name));
+        if pix.exists() {
+            return Some(pix);
+        }
+        let pix_exact = PathBuf::from(format!("/usr/share/pixmaps/{}", icon_name));
+        if pix_exact.exists()
+            && pix_exact
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("png"))
+                .unwrap_or(false)
+        {
+            return Some(pix_exact);
+        }
+        None
+    }
+
+    fn ensure_icon_cached(&mut self, icon_name: &str) {
+        if icon_name.is_empty() || self.icon_cache.contains_key(icon_name) {
+            return;
+        }
+        let loaded = Self::find_icon_png(icon_name).and_then(|path| {
+            let img = image::open(path).ok()?;
+            let small = img
+                .resize_exact(
+                    SMALL_ICON_SZ,
+                    SMALL_ICON_SZ,
+                    image::imageops::FilterType::Triangle,
+                )
+                .to_rgba8()
+                .into_raw();
+            let large = img
+                .resize_exact(
+                    LARGE_ICON_SZ,
+                    LARGE_ICON_SZ,
+                    image::imageops::FilterType::Triangle,
+                )
+                .to_rgba8()
+                .into_raw();
+            Some(CachedIcon { small, large })
+        });
+        self.icon_cache.insert(icon_name.to_string(), loaded);
+    }
+
+    fn blit_rgba_rounded(
+        buf: &mut [u8],
+        buf_size: (u32, u32),
+        rgba: &[u8],
+        icon_size: (u32, u32),
+        center: (f32, f32),
+        radius: f32,
+        alpha_mul: f32,
+    ) {
+        let (bw, bh) = buf_size;
+        let (iw, ih) = icon_size;
+        let (cx, cy) = center;
+        let x0 = (cx - iw as f32 * 0.5).round() as i32;
+        let y0 = (cy - ih as f32 * 0.5).round() as i32;
+        let hw = iw as f32 * 0.5;
+        let hh = ih as f32 * 0.5;
+
+        for sy in 0..ih as i32 {
+            let dy = y0 + sy;
+            if dy < 0 || dy >= bh as i32 {
+                continue;
+            }
+            for sx in 0..iw as i32 {
+                let dx = x0 + sx;
+                if dx < 0 || dx >= bw as i32 {
+                    continue;
+                }
+                let lx = (sx as f32 + 0.5 - hw).abs() - (hw - radius);
+                let ly = (sy as f32 + 0.5 - hh).abs() - (hh - radius);
+                let sdf = lx.max(0.0).hypot(ly.max(0.0)) + lx.max(ly).min(0.0) - radius;
+                let mask = (0.5 - sdf).clamp(0.0, 1.0);
+                if mask <= 0.001 {
+                    continue;
+                }
+
+                let si = ((sy as u32 * iw + sx as u32) * 4) as usize;
+                let a = (rgba[si + 3] as f32 / 255.0) * mask * alpha_mul;
+                if a <= 0.001 {
+                    continue;
+                }
+
+                let di = ((dy as u32 * bw + dx as u32) * 4) as usize;
+                let inv_a = 1.0 - a;
+                buf[di] = (rgba[si] as f32 * a + buf[di] as f32 * inv_a).min(255.0) as u8;
+                buf[di + 1] =
+                    (rgba[si + 1] as f32 * a + buf[di + 1] as f32 * inv_a).min(255.0) as u8;
+                buf[di + 2] =
+                    (rgba[si + 2] as f32 * a + buf[di + 2] as f32 * inv_a).min(255.0) as u8;
+                buf[di + 3] = ((a * 255.0) + buf[di + 3] as f32 * inv_a).min(255.0) as u8;
+            }
+        }
+    }
+
+    fn draw_fallback_icon(
+        font: &UIFont,
+        buf: &mut [u8],
+        buf_size: (u32, u32),
+        app: &DesktopApp,
+        center: (f32, f32),
+        col: [u8; 4],
+        large: bool,
+    ) {
+        let (w, h) = buf_size;
+        let (cx, cy) = center;
+        let key = format!("{} {}", app.icon, app.name).to_lowercase();
+        if key.contains("control center") || key.contains("setting") || key.contains("config") {
+            UIFont::draw_settings_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("notification") || key.contains("bell") {
+            UIFont::draw_bell_icon(buf, w, h, cx, cy, if large { 1.6 } else { 1.0 }, col);
+        } else if key.contains("lock") {
+            UIFont::draw_lock_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("suspend") || key.contains("sleep") || key.contains("moon") {
+            UIFont::draw_moon_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("reboot") || key.contains("restart") {
+            UIFont::draw_restart_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("power") || key.contains("shutdown") {
+            UIFont::draw_power_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("term")
+            || key.contains("kitty")
+            || key.contains("alacritty")
+            || key.contains("wezterm")
+            || key.contains("foot")
+            || key.contains("konsole")
+        {
+            UIFont::draw_terminal_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("browser")
+            || key.contains("firefox")
+            || key.contains("chrom")
+            || key.contains("brave")
+            || key.contains("zen")
+        {
+            UIFont::draw_browser_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("code")
+            || key.contains("editor")
+            || key.contains("nvim")
+            || key.contains("vim")
+            || key.contains("antigravity")
+            || key.contains("zed")
+        {
+            UIFont::draw_editor_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("file")
+            || key.contains("folder")
+            || key.contains("thunar")
+            || key.contains("dolphin")
+            || key.contains("nautilus")
+        {
+            UIFont::draw_folder_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("music")
+            || key.contains("spotify")
+            || key.contains("vlc")
+            || key.contains("audio")
+        {
+            UIFont::draw_music_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("htop") || key.contains("btop") || key.contains("monitor") {
+            UIFont::draw_cpu_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("calendar") {
+            UIFont::draw_calendar_icon(buf, w, h, cx, cy, col);
+        } else if key.contains("clock") || key.contains("time") {
+            UIFont::draw_clock_icon(buf, w, h, cx, cy, col);
+        } else {
+            let ch = app
+                .name
+                .chars()
+                .find(|c| c.is_alphanumeric())
+                .unwrap_or('•')
+                .to_uppercase()
+                .to_string();
+            font.draw_text_centered(
+                buf,
+                w,
+                h,
+                &ch,
+                cx,
+                cy,
+                if large { 22.0 } else { 13.0 },
+                col,
+                [0, 0, 0, 0],
+                FontWeight::Bold,
+            );
+        }
     }
 
     fn system_actions() -> Vec<DesktopApp> {
@@ -421,36 +665,42 @@ impl LauncherWidget {
                 name: "Control Center".into(),
                 exec: "echo control > /tmp/liquid_island.fifo".into(),
                 comment: "Open Atlantis Control Center".into(),
+                icon: "preferences-system".into(),
                 is_action: true,
             },
             DesktopApp {
                 name: "Notifications".into(),
                 exec: "echo notif > /tmp/liquid_island.fifo".into(),
                 comment: "Show Island Notification History".into(),
+                icon: "notifications".into(),
                 is_action: true,
             },
             DesktopApp {
                 name: "Lock Screen".into(),
                 exec: "hyprlock".into(),
                 comment: "Lock current Wayland session".into(),
+                icon: "system-lock-screen".into(),
                 is_action: true,
             },
             DesktopApp {
                 name: "Suspend".into(),
                 exec: "systemctl suspend".into(),
                 comment: "Put system to sleep".into(),
+                icon: "system-suspend".into(),
                 is_action: true,
             },
             DesktopApp {
                 name: "Reboot".into(),
                 exec: "systemctl reboot".into(),
                 comment: "Restart computer".into(),
+                icon: "system-reboot".into(),
                 is_action: true,
             },
             DesktopApp {
                 name: "Power Off".into(),
                 exec: "systemctl poweroff".into(),
                 comment: "Shut down computer".into(),
+                icon: "system-shutdown".into(),
                 is_action: true,
             },
         ]
@@ -466,7 +716,6 @@ impl LauncherWidget {
         {
             return None;
         }
-        // Simple left-to-right precedence-aware evaluator (+,- and *,/)
         let val = eval_expr_add_sub(&clean)?;
         if val.is_finite() {
             if (val - val.round()).abs() < 1e-6 {
@@ -626,8 +875,8 @@ impl LauncherWidget {
 
         match event.kind {
             PointerEventKind::Motion { .. } => {
-                if ly >= 82.0 {
-                    let rel = ((ly - 82.0) / 54.0).floor() as usize;
+                if lx < DIVIDER_X && ly >= LIST_TOP_Y {
+                    let rel = ((ly - LIST_TOP_Y) / ROW_H).floor() as usize;
                     let idx = self.scroll_offset + rel;
                     if rel < MAX_VISIBLE_ROWS && idx < self.filtered.len() {
                         self.selected_idx = idx;
@@ -637,14 +886,17 @@ impl LauncherWidget {
                 false
             }
             PointerEventKind::Press { button: 272, .. } => {
-                if ly >= 82.0 {
-                    let rel = ((ly - 82.0) / 54.0).floor() as usize;
+                if lx < DIVIDER_X && ly >= LIST_TOP_Y {
+                    let rel = ((ly - LIST_TOP_Y) / ROW_H).floor() as usize;
                     let idx = self.scroll_offset + rel;
                     if rel < MAX_VISIBLE_ROWS && idx < self.filtered.len() {
                         self.selected_idx = idx;
                         self.activate_selected();
                         return true;
                     }
+                } else if (448.0..=644.0).contains(&lx) && (396.0..=432.0).contains(&ly) {
+                    self.activate_selected();
+                    return true;
                 }
                 false
             }
@@ -678,14 +930,14 @@ impl LauncherWidget {
     }
 
     fn draw_search_icon(buf: &mut [u8], w: u32, h: u32, cx: f32, cy: f32, col: [u8; 4]) {
-        UIFont::draw_rounded_rect_stroke(buf, w, h, cx - 1.5, cy - 1.5, 5.2, 5.2, 5.2, 1.4, col);
+        UIFont::draw_rounded_rect_stroke(buf, w, h, cx - 1.5, cy - 1.5, 5.5, 5.5, 5.5, 1.5, col);
         UIFont::draw_segment(
             buf,
             w,
             h,
-            (cx + 2.5, cy + 2.5),
-            (cx + 6.5, cy + 6.5),
-            1.5,
+            (cx + 2.8, cy + 2.8),
+            (cx + 7.2, cy + 7.2),
+            1.6,
             col,
         );
     }
@@ -701,6 +953,20 @@ impl LauncherWidget {
             return;
         }
 
+        // Pre-cache icons for visible rows + selected item
+        let mut icons_to_cache = Vec::new();
+        for slot in 0..MAX_VISIBLE_ROWS {
+            if let Some(SearchResult::App(app)) = self.filtered.get(self.scroll_offset + slot) {
+                icons_to_cache.push(app.icon.clone());
+            }
+        }
+        if let Some(SearchResult::App(app)) = self.filtered.get(self.selected_idx) {
+            icons_to_cache.push(app.icon.clone());
+        }
+        for name in icons_to_cache {
+            self.ensure_icon_cached(&name);
+        }
+
         let is_light = self.effective_is_light();
         let mut buf_vec = std::mem::take(&mut self.overlay_buffer);
         let buf = &mut buf_vec[..];
@@ -711,14 +977,31 @@ impl LauncherWidget {
             [245, 247, 252, a]
         };
         let col_dim = if is_light {
-            [45, 60, 80, (175.0 * t) as u8]
+            [42, 56, 76, (175.0 * t) as u8]
         } else {
             [205, 218, 238, (175.0 * t) as u8]
         };
+        let col_accent = if is_light {
+            [18, 108, 224, (220.0 * t) as u8]
+        } else {
+            [115, 190, 255, (230.0 * t) as u8]
+        };
+        let pill_bg = if is_light {
+            [0, 0, 0, (16.0 * t) as u8]
+        } else {
+            [255, 255, 255, (24.0 * t) as u8]
+        };
+        let pill_rim = if is_light {
+            [0, 0, 0, (34.0 * t) as u8]
+        } else {
+            [255, 255, 255, (48.0 * t) as u8]
+        };
         let no_shadow = [0, 0, 0, 0];
 
-        // 1. Search Bar
-        Self::draw_search_icon(buf, self.width, self.height, 34.0, 40.0, col_dim);
+        // ── CARD 1: TOP FLOATING SEARCH PILL (y: 0..64) ─────────────────────
+        let search_cy = SEARCH_CARD_H * 0.5;
+        Self::draw_search_icon(buf, self.width, self.height, 30.0, search_cy, col_accent);
+
         let display_q = if self.query.is_empty() {
             "Search apps, > commands, or math..."
         } else {
@@ -734,8 +1017,8 @@ impl LauncherWidget {
             self.width,
             self.height,
             display_q,
-            56.0,
-            40.0,
+            52.0,
+            search_cy,
             16.5,
             q_col,
             no_shadow,
@@ -747,30 +1030,245 @@ impl LauncherWidget {
                 self.width,
                 self.height,
                 q_end + 3.0,
-                40.0,
-                0.8,
-                9.0,
+                search_cy,
+                0.9,
+                9.5,
                 0.5,
-                col_ink,
+                col_accent,
             );
         }
 
-        let count_s = format!("{} results", self.filtered.len());
-        let cw = self.font.measure_text(&count_s, 11.0, FontWeight::Medium);
-        self.font.draw_text_centered_y(
+        // Mode badge + count pill on right of search bar
+        let mode_label = if self.query.trim().starts_with('>') {
+            "Actions"
+        } else if Self::eval_math(&self.query).is_some() {
+            "Math"
+        } else {
+            "Apps"
+        };
+        let badge_s = format!("{} · {}", mode_label, self.filtered.len());
+        let bw = self.font.measure_text(&badge_s, 11.0, FontWeight::SemiBold);
+        let pill_hw = (bw * 0.5 + 11.0).max(34.0);
+        let pill_cx = self.width as f32 - 20.0 - pill_hw;
+        UIFont::draw_rounded_rect_fill(
             buf,
             self.width,
             self.height,
-            &count_s,
-            self.width as f32 - 26.0 - cw,
-            40.0,
+            pill_cx,
+            search_cy,
+            pill_hw,
+            12.0,
+            10.0,
+            pill_bg,
+        );
+        UIFont::draw_rounded_rect_stroke(
+            buf,
+            self.width,
+            self.height,
+            pill_cx,
+            search_cy,
+            pill_hw,
+            12.0,
+            10.0,
+            0.8,
+            pill_rim,
+        );
+        self.font.draw_text_centered(
+            buf,
+            self.width,
+            self.height,
+            &badge_s,
+            pill_cx,
+            search_cy,
             11.0,
             col_dim,
             no_shadow,
-            FontWeight::Medium,
+            FontWeight::SemiBold,
         );
 
-        // Subtle divider hairline
+        // ── CARD 2: LEFT RESULTS LIST (x: 14..404, y: 94..430) ──────────────
+        let row_w = DIVIDER_X - 30.0;
+        let row_cx = 14.0 + row_w * 0.5;
+        for slot in 0..MAX_VISIBLE_ROWS {
+            let idx = self.scroll_offset + slot;
+            let Some(item) = self.filtered.get(idx) else {
+                break;
+            };
+            let ry = LIST_TOP_Y + ROW_H * 0.5 + (slot as f32) * ROW_H;
+            let is_sel = idx == self.selected_idx;
+
+            if is_sel {
+                let sel_bg = if is_light {
+                    [0, 0, 0, (22.0 * t) as u8]
+                } else {
+                    [255, 255, 255, (30.0 * t) as u8]
+                };
+                UIFont::draw_rounded_rect_fill(
+                    buf,
+                    self.width,
+                    self.height,
+                    row_cx,
+                    ry,
+                    row_w * 0.5,
+                    24.0,
+                    12.0,
+                    sel_bg,
+                );
+                UIFont::draw_rounded_rect_stroke(
+                    buf,
+                    self.width,
+                    self.height,
+                    row_cx,
+                    ry,
+                    row_w * 0.5,
+                    24.0,
+                    12.0,
+                    0.9,
+                    pill_rim,
+                );
+                // Left accent indicator bar
+                UIFont::draw_rounded_rect_fill(
+                    buf,
+                    self.width,
+                    self.height,
+                    18.0,
+                    ry,
+                    1.5,
+                    12.0,
+                    1.5,
+                    col_accent,
+                );
+            }
+
+            let icon_cx = 40.0;
+            UIFont::draw_rounded_rect_fill(
+                buf,
+                self.width,
+                self.height,
+                icon_cx,
+                ry,
+                16.0,
+                16.0,
+                9.0,
+                pill_bg,
+            );
+
+            match item {
+                SearchResult::Calc { expr, value } => {
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        "=",
+                        icon_cx,
+                        ry,
+                        15.0,
+                        col_accent,
+                        no_shadow,
+                        FontWeight::Bold,
+                    );
+                    let title_trunc: String = format!("= {}", value).chars().take(24).collect();
+                    let sub_trunc: String =
+                        format!("{} · Enter to copy", expr).chars().take(34).collect();
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        &title_trunc,
+                        66.0,
+                        ry - 7.5,
+                        13.5,
+                        col_ink,
+                        no_shadow,
+                        FontWeight::SemiBold,
+                    );
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        &sub_trunc,
+                        66.0,
+                        ry + 9.0,
+                        10.5,
+                        col_dim,
+                        no_shadow,
+                        FontWeight::Medium,
+                    );
+                }
+                SearchResult::App(app) => {
+                    if let Some(Some(cached)) = self.icon_cache.get(&app.icon) {
+                        Self::blit_rgba_rounded(
+                            buf,
+                            (self.width, self.height),
+                            &cached.small,
+                            (SMALL_ICON_SZ, SMALL_ICON_SZ),
+                            (icon_cx, ry),
+                            6.5,
+                            t,
+                        );
+                    } else {
+                        Self::draw_fallback_icon(
+                            &self.font,
+                            buf,
+                            (self.width, self.height),
+                            app,
+                            (icon_cx, ry),
+                            col_ink,
+                            false,
+                        );
+                    }
+                    let title_trunc: String = app.name.chars().take(24).collect();
+                    let sub_src = if app.comment.is_empty() {
+                        &app.exec
+                    } else {
+                        &app.comment
+                    };
+                    let sub_trunc: String = sub_src.chars().take(34).collect();
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        &title_trunc,
+                        66.0,
+                        ry - 7.5,
+                        13.5,
+                        col_ink,
+                        no_shadow,
+                        FontWeight::SemiBold,
+                    );
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        &sub_trunc,
+                        66.0,
+                        ry + 9.0,
+                        10.5,
+                        col_dim,
+                        no_shadow,
+                        FontWeight::Medium,
+                    );
+                }
+            }
+
+            if is_sel {
+                let hw = self.font.measure_text("↵", 12.0, FontWeight::Bold);
+                self.font.draw_text_centered_y(
+                    buf,
+                    self.width,
+                    self.height,
+                    "↵",
+                    DIVIDER_X - 24.0 - hw,
+                    ry,
+                    12.0,
+                    col_accent,
+                    no_shadow,
+                    FontWeight::Bold,
+                );
+            }
+        }
+
+        // ── VERTICAL HAIRLINE DIVIDER (x = 414) ─────────────────────────────
         let div_c = if is_light {
             [0, 0, 0, (24.0 * t) as u8]
         } else {
@@ -780,151 +1278,288 @@ impl LauncherWidget {
             buf,
             self.width,
             self.height,
-            self.width as f32 * 0.5,
-            68.0,
-            (self.width as f32 - 44.0) * 0.5,
+            DIVIDER_X,
+            262.0,
             0.5,
+            168.0,
             0.5,
             div_c,
         );
 
-        // 2. Results list (up to 6 rows)
-        let row_w = self.width as f32 - 36.0;
-        let row_cx = self.width as f32 * 0.5;
-        for slot in 0..MAX_VISIBLE_ROWS {
-            let idx = self.scroll_offset + slot;
-            let Some(item) = self.filtered.get(idx) else {
-                break;
-            };
-            let ry = 104.0 + (slot as f32) * 54.0;
-            let is_sel = idx == self.selected_idx;
-
-            if is_sel {
-                let sel_bg = if is_light {
-                    [0, 0, 0, (22.0 * t) as u8]
-                } else {
-                    [255, 255, 255, (32.0 * t) as u8]
-                };
-                UIFont::draw_rounded_rect_fill(
-                    buf,
-                    self.width,
-                    self.height,
-                    row_cx,
-                    ry,
-                    row_w * 0.5,
-                    22.0,
-                    12.0,
-                    sel_bg,
-                );
-                let sel_rim = if is_light {
-                    [0, 0, 0, (36.0 * t) as u8]
-                } else {
-                    [255, 255, 255, (50.0 * t) as u8]
-                };
-                UIFont::draw_rounded_rect_stroke(
-                    buf,
-                    self.width,
-                    self.height,
-                    row_cx,
-                    ry,
-                    row_w * 0.5,
-                    22.0,
-                    12.0,
-                    0.9,
-                    sel_rim,
-                );
-            }
-
-            let (badge, title, sub) = match item {
-                SearchResult::Calc { expr, value } => (
-                    "=",
-                    format!("= {}", value),
-                    format!("{} · Enter to copy", expr),
-                ),
-                SearchResult::App(app) => (
-                    if app.is_action { ">" } else { "•" },
-                    app.name.clone(),
-                    if app.comment.is_empty() {
-                        app.exec.clone()
-                    } else {
-                        app.comment.clone()
-                    },
-                ),
-            };
-
-            let badge_bg = if is_light {
-                [0, 0, 0, (16.0 * t) as u8]
-            } else {
-                [255, 255, 255, (24.0 * t) as u8]
-            };
+        // ── CARD 2: RIGHT INSPECTOR PANE (x: 414..680, cx = 547) ────────────
+        let insp_cx = (DIVIDER_X + self.width as f32) * 0.5;
+        if let Some(sel) = self.filtered.get(self.selected_idx) {
+            // Large squircle showcase badge
+            let badge_cy = 158.0;
             UIFont::draw_rounded_rect_fill(
                 buf,
                 self.width,
                 self.height,
-                40.0,
-                ry,
-                13.0,
-                13.0,
-                8.0,
-                badge_bg,
+                insp_cx,
+                badge_cy,
+                34.0,
+                34.0,
+                16.0,
+                pill_bg,
             );
+            UIFont::draw_rounded_rect_stroke(
+                buf,
+                self.width,
+                self.height,
+                insp_cx,
+                badge_cy,
+                34.0,
+                34.0,
+                16.0,
+                1.0,
+                pill_rim,
+            );
+
+            match sel {
+                SearchResult::Calc { expr, value } => {
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        "=",
+                        insp_cx,
+                        badge_cy,
+                        28.0,
+                        col_accent,
+                        no_shadow,
+                        FontWeight::Bold,
+                    );
+                    let val_s: String = value.chars().take(16).collect();
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        &val_s,
+                        insp_cx,
+                        214.0,
+                        18.0,
+                        col_ink,
+                        no_shadow,
+                        FontWeight::Bold,
+                    );
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        "Calculator",
+                        insp_cx,
+                        242.0,
+                        11.0,
+                        col_accent,
+                        no_shadow,
+                        FontWeight::SemiBold,
+                    );
+                    let expr_s: String = expr.chars().take(28).collect();
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        &expr_s,
+                        insp_cx,
+                        284.0,
+                        12.0,
+                        col_dim,
+                        no_shadow,
+                        FontWeight::Medium,
+                    );
+                }
+                SearchResult::App(app) => {
+                    if let Some(Some(cached)) = self.icon_cache.get(&app.icon) {
+                        Self::blit_rgba_rounded(
+                            buf,
+                            (self.width, self.height),
+                            &cached.large,
+                            (LARGE_ICON_SZ, LARGE_ICON_SZ),
+                            (insp_cx, badge_cy),
+                            11.0,
+                            t,
+                        );
+                    } else {
+                        Self::draw_fallback_icon(
+                            &self.font,
+                            buf,
+                            (self.width, self.height),
+                            app,
+                            (insp_cx, badge_cy),
+                            col_ink,
+                            true,
+                        );
+                    }
+                    let title_s: String = app.name.chars().take(20).collect();
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        &title_s,
+                        insp_cx,
+                        214.0,
+                        15.5,
+                        col_ink,
+                        no_shadow,
+                        FontWeight::Bold,
+                    );
+
+                    let kind_s = if app.is_action {
+                        "System Action"
+                    } else {
+                        "Application"
+                    };
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        kind_s,
+                        insp_cx,
+                        240.0,
+                        11.0,
+                        col_accent,
+                        no_shadow,
+                        FontWeight::SemiBold,
+                    );
+
+                    let desc_src = if app.comment.is_empty() {
+                        "Launch desktop application"
+                    } else {
+                        &app.comment
+                    };
+                    let line1: String = desc_src.chars().take(28).collect();
+                    let line2: String = desc_src.chars().skip(28).take(28).collect();
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        &line1,
+                        insp_cx,
+                        276.0,
+                        11.5,
+                        col_dim,
+                        no_shadow,
+                        FontWeight::Medium,
+                    );
+                    if !line2.is_empty() {
+                        self.font.draw_text_centered(
+                            buf,
+                            self.width,
+                            self.height,
+                            &line2,
+                            insp_cx,
+                            294.0,
+                            11.5,
+                            col_dim,
+                            no_shadow,
+                            FontWeight::Medium,
+                        );
+                    }
+
+                    let exec_s: String = app.exec.chars().take(26).collect();
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        &exec_s,
+                        insp_cx,
+                        326.0,
+                        10.0,
+                        col_dim,
+                        no_shadow,
+                        FontWeight::Regular,
+                    );
+
+                    let count = *self.freq.get(&app.name).unwrap_or(&0);
+                    let freq_s = if count == 1 {
+                        "Launched 1 time".to_string()
+                    } else {
+                        format!("Launched {} times", count)
+                    };
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        &freq_s,
+                        insp_cx,
+                        364.0,
+                        10.5,
+                        col_dim,
+                        no_shadow,
+                        FontWeight::Medium,
+                    );
+                }
+            }
+
+            // Primary Launch / Copy pill button at bottom of Inspector
+            let btn_cy = 414.0;
+            UIFont::draw_rounded_rect_fill(
+                buf,
+                self.width,
+                self.height,
+                insp_cx,
+                btn_cy,
+                96.0,
+                16.0,
+                11.0,
+                pill_bg,
+            );
+            UIFont::draw_rounded_rect_stroke(
+                buf,
+                self.width,
+                self.height,
+                insp_cx,
+                btn_cy,
+                96.0,
+                16.0,
+                11.0,
+                0.9,
+                pill_rim,
+            );
+            let btn_label = match sel {
+                SearchResult::Calc { .. } => "Copy Result · Enter",
+                SearchResult::App(a) if a.is_action => "Run Action · Enter",
+                SearchResult::App(_) => "Launch App · Enter",
+            };
             self.font.draw_text_centered(
                 buf,
                 self.width,
                 self.height,
-                badge,
-                40.0,
-                ry,
-                12.5,
-                col_ink,
-                no_shadow,
-                FontWeight::Bold,
-            );
-
-            let title_trunc: String = title.chars().take(34).collect();
-            let sub_trunc: String = sub.chars().take(48).collect();
-            self.font.draw_text_centered_y(
-                buf,
-                self.width,
-                self.height,
-                &title_trunc,
-                64.0,
-                ry - 7.0,
-                13.5,
+                btn_label,
+                insp_cx,
+                btn_cy,
+                11.5,
                 col_ink,
                 no_shadow,
                 FontWeight::SemiBold,
             );
-            self.font.draw_text_centered_y(
-                buf,
-                self.width,
-                self.height,
-                &sub_trunc,
-                64.0,
-                ry + 9.0,
-                10.5,
-                col_dim,
-                no_shadow,
-                FontWeight::Medium,
-            );
-
-            if is_sel {
-                let hint = "Enter";
-                let hw = self.font.measure_text(hint, 10.5, FontWeight::Medium);
-                self.font.draw_text_centered_y(
-                    buf,
-                    self.width,
-                    self.height,
-                    hint,
-                    self.width as f32 - 30.0 - hw,
-                    ry,
-                    10.5,
-                    col_dim,
-                    no_shadow,
-                    FontWeight::Medium,
-                );
-            }
         }
+
+        // ── BOTTOM FOOTER BAR (y: 446..490) ─────────────────────────────────
+        UIFont::draw_rounded_rect_fill(
+            buf,
+            self.width,
+            self.height,
+            self.width as f32 * 0.5,
+            446.0,
+            (self.width as f32 - 36.0) * 0.5,
+            0.5,
+            0.5,
+            div_c,
+        );
+        self.font.draw_text_centered(
+            buf,
+            self.width,
+            self.height,
+            "↑↓ Navigate   ·   Enter Launch   ·   > System Actions   ·   2+2 Math   ·   Esc Close",
+            self.width as f32 * 0.5,
+            468.0,
+            10.5,
+            col_dim,
+            no_shadow,
+            FontWeight::Medium,
+        );
+
         self.overlay_buffer = buf_vec;
     }
 
@@ -945,18 +1580,39 @@ impl LauncherWidget {
         if let Some(r) = &mut self.renderer {
             r.update_overlay(self.width, self.height, &self.overlay_buffer);
             let motion = (1.0 - t).clamp(0.0, 1.0);
-            let inset_x = motion * 0.08;
-            let inset_y = motion * 0.06;
-            let y_slide = motion * 0.05;
+            let inset_x = motion * 0.06;
+            let y_slide = motion * 0.04;
             let w_b = (1.0 - inset_x * 2.0).clamp(0.2, 1.0);
-            let h_b = (1.0 - inset_y * 2.0).clamp(0.2, 1.0);
             let x_b = (0.5 - w_b * 0.5).clamp(0.0, 0.8);
-            let y_b = (inset_y + y_slide).clamp(0.0, 0.8);
 
-            let card = GlassSurface::new()
+            let h_total = self.height as f32;
+            let search_h_norm = (SEARCH_CARD_H / h_total) * (1.0 - motion * 0.08);
+            let search_y_norm = (y_slide * 0.6).clamp(0.0, 0.8);
+
+            let main_y_norm = ((MAIN_CARD_Y / h_total) + y_slide).clamp(0.0, 0.85);
+            let main_h_norm =
+                (((h_total - MAIN_CARD_Y) / h_total) * (1.0 - motion * 0.05)).min(1.0 - main_y_norm);
+
+            let search_card = GlassSurface::new()
                 .material(Material::LiquidGlass)
-                .shape(Shape::RoundedRectangle { radius: 22.0 })
-                .bounds(x_b, y_b, w_b.min(1.0 - x_b), h_b.min(1.0 - y_b))
+                .shape(Shape::RoundedRectangle { radius: 20.0 })
+                .bounds(x_b, search_y_norm, w_b.min(1.0 - x_b), search_h_norm)
+                .curvature(18.0)
+                .bevel(14.0 + motion * 5.0)
+                .refraction(18.0 + motion * 12.0)
+                .dispersion(0.14)
+                .blur(self.blur_radius)
+                .specular(1.25)
+                .fresnel(0.65)
+                .style_mode(self.style_mode)
+                .tint(0.0, 0.0, t, is_light)
+                .element_type(27.0)
+                .pointer_pos(self.cursor_pos[0], self.cursor_pos[1]);
+
+            let main_card = GlassSurface::new()
+                .material(Material::LiquidGlass)
+                .shape(Shape::RoundedRectangle { radius: 24.0 })
+                .bounds(x_b, main_y_norm, w_b.min(1.0 - x_b), main_h_norm)
                 .curvature(20.0)
                 .bevel(16.0 + motion * 6.0)
                 .refraction(20.0 + motion * 16.0)
@@ -968,7 +1624,8 @@ impl LauncherWidget {
                 .tint(0.0, 0.0, t, is_light)
                 .element_type(27.0)
                 .pointer_pos(self.cursor_pos[0], self.cursor_pos[1]);
-            let _ = r.render(&[card]);
+
+            let _ = r.render(&[search_card, main_card]);
         }
         !self.open_spring.is_at_rest()
     }
