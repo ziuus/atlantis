@@ -218,6 +218,7 @@ pub struct DockWidget {
 
     pub is_window_overlapping: bool,
     pub app_backdrop_solid: bool,
+    pub power_save: bool,
     pub last_window_check: Instant,
     pub hot_edge_dwell_start: Option<Instant>,
     pub needs_redraw: bool,
@@ -341,6 +342,7 @@ impl DockWidget {
 
             is_window_overlapping: false,
             app_backdrop_solid: true,
+            power_save: false,
             last_window_check: Instant::now() - Duration::from_secs(60),
             hot_edge_dwell_start: None,
             needs_redraw: true,
@@ -873,6 +875,20 @@ impl DockWidget {
     }
 
     pub fn update_physics(&mut self, dt: f32) -> bool {
+        if self.power_save {
+            let changed = !self.size_spring.is_at_rest();
+            self.size_spring.snap_to_target();
+            let t = self.size_spring.value.clamp(0.0, 1.0);
+            let target_y = self.dock_mode.expanded_y();
+            self.current_w = self.compact_w + (DOCK_EXPANDED_W - self.compact_w) * t;
+            self.current_h = self.compact_h + (DOCK_EXPANDED_H - self.compact_h) * t;
+            self.current_y = DOCK_COMPACT_Y + (target_y - DOCK_COMPACT_Y) * t;
+            if changed {
+                self.needs_redraw = true;
+                self.needs_input_region_update = true;
+            }
+            return false;
+        }
         let eff_dt = (dt * self.anim_speed).clamp(0.001, 0.05);
         self.size_spring.update(eff_dt);
         if (self.size_spring.value - self.size_spring.target).abs() < 0.002

@@ -153,6 +153,7 @@ pub struct TodoWidget {
     #[allow(dead_code)]
     pub is_window_overlapping: bool,
     pub app_backdrop_solid: bool,
+    pub power_save: bool,
     #[allow(dead_code)]
     pub last_window_check: Instant,
     pub is_hidden_by_window: bool,
@@ -311,6 +312,7 @@ impl TodoWidget {
 
             is_window_overlapping: false,
             app_backdrop_solid: true,
+            power_save: false,
             last_window_check: Instant::now() - std::time::Duration::from_secs(60),
             is_hidden_by_window: false,
             needs_redraw: true,
@@ -1198,6 +1200,25 @@ impl TodoWidget {
     }
 
     pub fn update_physics(&mut self, dt: f32) -> bool {
+        if self.power_save {
+            let changed = !self.tab_spring.is_at_rest()
+                || !self.filter_spring.is_at_rest()
+                || !self.size_spring.is_at_rest();
+            self.tab_spring.snap_to_target();
+            self.filter_spring.snap_to_target();
+            self.size_spring.snap_to_target();
+            let t = self.size_spring.value.clamp(0.0, 1.0);
+            let card_h = self.get_card_height();
+            self.target_h = card_h;
+            self.target_w = CARD_W;
+            self.current_w = COMPACT_W + (self.target_w - COMPACT_W) * t;
+            self.current_h = COMPACT_H + (self.target_h - COMPACT_H) * t;
+            if changed {
+                self.needs_redraw = true;
+                self.needs_input_region_update = true;
+            }
+            return false;
+        }
         let eff_dt = dt * self.anim_speed;
         self.tab_spring.update(eff_dt);
         if (self.tab_spring.value - self.tab_spring.target).abs() < 0.002

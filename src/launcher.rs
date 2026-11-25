@@ -100,6 +100,7 @@ pub struct LauncherWidget {
     pub is_open: bool,
     pub is_window_overlapping: bool,
     pub app_backdrop_solid: bool,
+    pub power_save: bool,
     pub open_spring: Spring,
     pub panel_spring: Spring,
     pub style_mode: f32,
@@ -177,6 +178,7 @@ impl LauncherWidget {
             is_open: false,
             is_window_overlapping: false,
             app_backdrop_solid: true,
+            power_save: false,
             open_spring: Spring::with_params(
                 0.0,
                 SpringParams {
@@ -348,6 +350,16 @@ impl LauncherWidget {
     }
 
     pub fn update_physics(&mut self, dt: f32) -> bool {
+        if self.power_save {
+            let changed = !self.open_spring.is_at_rest() || !self.panel_spring.is_at_rest();
+            self.open_spring.snap_to_target();
+            self.panel_spring.snap_to_target();
+            if changed {
+                self.needs_redraw = true;
+                self.needs_input_region_update = true;
+            }
+            return false;
+        }
         let eff_dt = (dt * self.anim_speed).clamp(0.0, 0.05);
         self.open_spring.update(eff_dt);
         self.panel_spring.update(eff_dt);
@@ -502,10 +514,8 @@ impl LauncherWidget {
         for base in &bases {
             for theme in &themes {
                 for sz in &sizes {
-                    let cand = PathBuf::from(format!(
-                        "{}/{}/{}/apps/{}.png",
-                        base, theme, sz, icon_name
-                    ));
+                    let cand =
+                        PathBuf::from(format!("{}/{}/{}/apps/{}.png", base, theme, sz, icon_name));
                     if cand.exists() {
                         return Some(cand);
                     }
@@ -1208,8 +1218,10 @@ impl LauncherWidget {
                         FontWeight::Bold,
                     );
                     let title_trunc: String = format!("= {}", value).chars().take(24).collect();
-                    let sub_trunc: String =
-                        format!("{} · Enter to copy", expr).chars().take(34).collect();
+                    let sub_trunc: String = format!("{} · Enter to copy", expr)
+                        .chars()
+                        .take(34)
+                        .collect();
                     self.font.draw_text_centered_y(
                         buf,
                         self.width,
@@ -1658,7 +1670,12 @@ impl LauncherWidget {
                 let main_card = GlassSurface::new()
                     .material(Material::LiquidGlass)
                     .shape(Shape::RoundedRectangle { radius: 24.0 })
-                    .bounds(x_panel, main_y_norm, w_panel.min(1.0 - x_panel), main_h_norm)
+                    .bounds(
+                        x_panel,
+                        main_y_norm,
+                        w_panel.min(1.0 - x_panel),
+                        main_h_norm,
+                    )
                     .curvature(20.0)
                     .bevel(16.0 + m_panel * 8.0)
                     .refraction(20.0 + m_panel * 18.0)

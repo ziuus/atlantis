@@ -2300,6 +2300,26 @@ impl IslandWidget {
     }
 
     pub fn update_physics(&mut self, dt: f32) -> bool {
+        if self.power_save {
+            let changed = (self.current_w - self.target_w).abs() > 0.5
+                || (self.current_h - self.target_h).abs() > 0.5
+                || (self.current_y - self.target_y).abs() > 0.5
+                || (self.current_alpha - self.target_alpha).abs() > 0.01;
+            self.current_w = self.target_w;
+            self.current_h = self.target_h;
+            self.current_y = self.target_y;
+            self.current_alpha = self.target_alpha;
+            self.vel_w = 0.0;
+            self.vel_h = 0.0;
+            self.vel_y = 0.0;
+            self.vel_alpha = 0.0;
+            if changed {
+                self.needs_redraw = true;
+                self.needs_input_region_update = true;
+            }
+            self.animating = false;
+            return false;
+        }
         let effective_dt = (dt * self.anim_speed).clamp(0.0, 0.05);
 
         // Apple Liquid Motion: fluid volume preservation (coupled squash & stretch)

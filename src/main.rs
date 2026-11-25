@@ -1062,11 +1062,10 @@ fn main() {
             if let Some(r) = &mut app.center_hero.renderer {
                 r.set_power_save(ps);
             }
-            let anim_spd = if ps { 25.0 } else { app.island.anim_speed };
-            app.clock.anim_speed = anim_spd;
-            app.todo.anim_speed = anim_spd;
-            app.dock.anim_speed = anim_spd;
-            app.launcher.anim_speed = anim_spd;
+            app.clock.power_save = ps;
+            app.todo.power_save = ps;
+            app.dock.power_save = ps;
+            app.launcher.power_save = ps;
             app.island.needs_redraw = true;
             app.clock.needs_redraw = true;
             app.todo.needs_redraw = true;
@@ -1274,9 +1273,7 @@ fn main() {
                 && !dock_active
                 && !launcher_active
                 && !pending_redraw;
-            let target_frame_ms = if app.island.power_save {
-                50u64
-            } else if music_only_compact {
+            let target_frame_ms = if music_only_compact {
                 33u64 // 30fps for idle compact music wave
             } else {
                 16u64 // ~60fps smooth animation pacing

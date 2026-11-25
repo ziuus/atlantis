@@ -190,6 +190,7 @@ pub struct ClockWidget {
 
     pub is_window_overlapping: bool,
     pub app_backdrop_solid: bool,
+    pub power_save: bool,
     pub last_window_check: Instant,
     pub is_hidden_by_window: bool,
     pub needs_redraw: bool,
@@ -358,6 +359,7 @@ impl ClockWidget {
 
             is_window_overlapping: false,
             app_backdrop_solid: true,
+            power_save: false,
             last_window_check: Instant::now() - Duration::from_secs(60),
             is_hidden_by_window: false,
             needs_redraw: true,
@@ -1069,6 +1071,21 @@ impl ClockWidget {
     }
 
     pub fn update_physics(&mut self, dt: f32) -> bool {
+        if self.power_save {
+            let changed = !self.size_spring.is_at_rest() || !self.page_spring.is_at_rest();
+            self.size_spring.snap_to_target();
+            self.page_spring.snap_to_target();
+            let t = self.size_spring.value.clamp(0.0, 1.0);
+            self.target_w = CARD_W;
+            self.target_h = CARD_H;
+            self.current_w = COMPACT_W + (self.target_w - COMPACT_W) * t;
+            self.current_h = COMPACT_H + (self.target_h - COMPACT_H) * t;
+            if changed {
+                self.needs_redraw = true;
+                self.needs_input_region_update = true;
+            }
+            return false;
+        }
         let eff_dt = dt * self.anim_speed;
         self.size_spring.update(eff_dt);
         if (self.size_spring.value - self.size_spring.target).abs() < 0.002
