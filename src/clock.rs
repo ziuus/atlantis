@@ -116,6 +116,7 @@ pub struct ClockWidget {
     pub power_hold_progress: f32,
 
     pub is_window_overlapping: bool,
+    pub app_backdrop_solid: bool,
     pub last_window_check: Instant,
     pub is_hidden_by_window: bool,
     pub needs_redraw: bool,
@@ -125,6 +126,14 @@ pub struct ClockWidget {
 }
 
 impl ClockWidget {
+    pub fn effective_style_mode(&self) -> f32 {
+        if self.app_backdrop_solid && self.is_window_overlapping {
+            0.0
+        } else {
+            self.style_mode
+        }
+    }
+
     pub fn effective_is_light(&self) -> bool {
         match self.theme_mode {
             1 => false, // Forced Dark
@@ -253,6 +262,7 @@ impl ClockWidget {
             power_hold_progress: 0.0,
 
             is_window_overlapping: false,
+            app_backdrop_solid: true,
             last_window_check: Instant::now() - Duration::from_secs(60),
             is_hidden_by_window: false,
             needs_redraw: true,
@@ -1615,6 +1625,7 @@ impl ClockWidget {
         let is_light_f32 = if self.effective_is_light() { 1.0 } else { 0.0 };
         let cx = self.current_cx();
 
+        let eff_style = self.effective_style_mode();
         let res = if let Some(renderer) = &mut self.renderer {
             renderer.update_overlay(self.width, self.height, &overlay_vec);
 
@@ -1643,7 +1654,7 @@ impl ClockWidget {
                     .blur(self.blur_radius)
                     .specular(1.15)
                     .fresnel(0.60)
-                    .style_mode(self.style_mode)
+                    .style_mode(eff_style)
                     .tint(0.0, 0.0, 1.0, is_light_f32)
                     .element_type(27.0)
                     .deformation(self.dock_mode.deformation())
@@ -1687,7 +1698,7 @@ impl ClockWidget {
                             .blur(self.blur_radius)
                             .specular(1.20)
                             .fresnel(0.65)
-                            .style_mode(self.style_mode)
+                            .style_mode(eff_style)
                             .tint(0.0, 0.0, 1.0, is_light_f32)
                             .roughness(if i == 2 {
                                 self.sys_stats.bat_pct as f32

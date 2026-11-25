@@ -437,6 +437,13 @@ impl ShellApp {
                     self.dock.style_mode = s as f32;
                     self.center_hero.style_mode = s as f32;
                 }
+                if let Some(ab) = val.get("app_backdrop_solid").and_then(|v| v.as_bool()) {
+                    self.clock.app_backdrop_solid = ab;
+                    self.island.app_backdrop_solid = ab;
+                    self.todo.app_backdrop_solid = ab;
+                    self.dock.app_backdrop_solid = ab;
+                    self.launcher.app_backdrop_solid = ab;
+                }
                 if let Some(b) = val
                     .get("blur_radius")
                     .or_else(|| val.get("blur"))
@@ -991,6 +998,16 @@ fn main() {
             app.todo.theme_mode = t;
             app.dock.theme_mode = t;
             app.launcher.theme_mode = t;
+            app.clock.draw();
+            app.todo.draw();
+            app.dock.draw();
+        }
+        if app.clock.app_backdrop_solid != app.island.app_backdrop_solid {
+            let ab = app.island.app_backdrop_solid;
+            app.clock.app_backdrop_solid = ab;
+            app.todo.app_backdrop_solid = ab;
+            app.dock.app_backdrop_solid = ab;
+            app.launcher.app_backdrop_solid = ab;
             app.clock.draw();
             app.todo.draw();
             app.dock.draw();

@@ -98,6 +98,8 @@ pub struct LauncherWidget {
     pub pos_y: i32,
 
     pub is_open: bool,
+    pub is_window_overlapping: bool,
+    pub app_backdrop_solid: bool,
     pub open_spring: Spring,
     pub style_mode: f32,
     pub theme_mode: u32,
@@ -172,6 +174,8 @@ impl LauncherWidget {
             pos_x,
             pos_y,
             is_open: false,
+            is_window_overlapping: false,
+            app_backdrop_solid: true,
             open_spring: Spring::with_params(
                 0.0,
                 SpringParams {
@@ -256,6 +260,14 @@ impl LauncherWidget {
         }
     }
 
+    pub fn effective_style_mode(&self) -> f32 {
+        if self.app_backdrop_solid && self.is_window_overlapping {
+            0.0
+        } else {
+            self.style_mode
+        }
+    }
+
     pub fn effective_is_light(&self) -> bool {
         match self.theme_mode {
             1 => false,
@@ -274,6 +286,12 @@ impl LauncherWidget {
 
     pub fn open(&mut self) {
         self.is_open = true;
+        self.is_window_overlapping = crate::island::IslandWidget::query_hyprland_overlap(
+            self.pos_x,
+            self.pos_y,
+            self.width as i32,
+            self.height as i32,
+        );
         self.opened_at = Instant::now();
         self.query.clear();
         self.selected_idx = 0;
@@ -1577,6 +1595,7 @@ impl LauncherWidget {
         self.render_ui_overlay();
         let is_light = if self.effective_is_light() { 1.0 } else { 0.0 };
 
+        let eff_style = self.effective_style_mode();
         if let Some(r) = &mut self.renderer {
             r.update_overlay(self.width, self.height, &self.overlay_buffer);
             let motion = (1.0 - t).clamp(0.0, 1.0);
@@ -1604,7 +1623,7 @@ impl LauncherWidget {
                 .blur(self.blur_radius)
                 .specular(1.25)
                 .fresnel(0.65)
-                .style_mode(self.style_mode)
+                .style_mode(eff_style)
                 .tint(0.0, 0.0, t, is_light)
                 .element_type(27.0)
                 .pointer_pos(self.cursor_pos[0], self.cursor_pos[1]);
@@ -1620,7 +1639,7 @@ impl LauncherWidget {
                 .blur(self.blur_radius)
                 .specular(1.25)
                 .fresnel(0.65)
-                .style_mode(self.style_mode)
+                .style_mode(eff_style)
                 .tint(0.0, 0.0, t, is_light)
                 .element_type(27.0)
                 .pointer_pos(self.cursor_pos[0], self.cursor_pos[1]);

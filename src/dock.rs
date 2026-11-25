@@ -217,12 +217,21 @@ pub struct DockWidget {
     pub pressed_item: Option<usize>,
 
     pub is_window_overlapping: bool,
+    pub app_backdrop_solid: bool,
     pub last_window_check: Instant,
     pub hot_edge_dwell_start: Option<Instant>,
     pub needs_redraw: bool,
 }
 
 impl DockWidget {
+    pub fn effective_style_mode(&self) -> f32 {
+        if self.app_backdrop_solid && self.is_window_overlapping {
+            0.0
+        } else {
+            self.style_mode
+        }
+    }
+
     pub fn effective_is_light(&self) -> bool {
         match self.theme_mode {
             1 => false,                   // Forced Dark
@@ -315,6 +324,7 @@ impl DockWidget {
             pressed_item: None,
 
             is_window_overlapping: false,
+            app_backdrop_solid: true,
             last_window_check: Instant::now() - Duration::from_secs(60),
             hot_edge_dwell_start: None,
             needs_redraw: true,
@@ -892,6 +902,7 @@ impl DockWidget {
         };
 
         let cx = (self.width as f32) * 0.5;
+        let eff_style = self.effective_style_mode();
         let buf = &mut self.overlay_buffer;
 
         let dock_left = cx - self.current_w * 0.5;
@@ -956,15 +967,19 @@ impl DockWidget {
                 );
             }
 
-            // Draw Icon with per-icon adaptive luminance
-            let item_is_light = Self::local_is_light(
-                self.wallpaper_crop.as_deref(),
-                self.width as usize,
-                self.height as usize,
-                item_cx,
-                item_cy,
-                is_light,
-            );
+            // Draw Icon with per-icon adaptive luminance (or uniform contrast on solid app backdrop)
+            let item_is_light = if eff_style < 0.5 {
+                is_light
+            } else {
+                Self::local_is_light(
+                    self.wallpaper_crop.as_deref(),
+                    self.width as usize,
+                    self.height as usize,
+                    item_cx,
+                    item_cy,
+                    is_light,
+                )
+            };
             let item_ink = if item_is_light {
                 [14, 18, 26, 255]
             } else {
@@ -1150,6 +1165,7 @@ impl DockWidget {
         let is_light_f32 = if self.effective_is_light() { 1.0 } else { 0.0 };
         let t = self.size_spring.value.clamp(0.0, 1.0);
 
+        let eff_style = self.effective_style_mode();
         if let Some(renderer) = &mut self.renderer {
             renderer.update_overlay(self.width, self.height, &self.overlay_buffer);
 
@@ -1179,7 +1195,7 @@ impl DockWidget {
                 .blur(self.blur_radius)
                 .specular(1.10)
                 .fresnel(0.60)
-                .style_mode(self.style_mode)
+                .style_mode(eff_style)
                 .tint(0.0, 0.0, 1.0, is_light_f32)
                 .element_type(28.0)
                 .deformation(if t < 0.15 {

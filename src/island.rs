@@ -524,6 +524,8 @@ pub enum IslandIpcEvent {
     PrevMenu,
     SetStyle(f32),
     CycleStyle,
+    ToggleAppBackdrop,
+    SetAppBackdrop(bool),
     SetTheme(u32),
     CycleTheme,
     SetDock(IslandDockMode),
@@ -655,6 +657,7 @@ pub struct IslandWidget {
     pub wallpaper_crop: Option<Vec<u8>>,
     pub start_time: Instant,
     pub style_mode: f32,
+    pub app_backdrop_solid: bool,
     pub theme_mode: u32,
     pub blur_radius: f32,
     pub anim_speed: f32,
@@ -667,6 +670,14 @@ pub struct IslandWidget {
 }
 
 impl IslandWidget {
+    pub fn effective_style_mode(&self) -> f32 {
+        if self.app_backdrop_solid && self.is_window_overlapping {
+            0.0
+        } else {
+            self.style_mode
+        }
+    }
+
     pub fn current_fillet_radius(&self) -> f32 {
         let h_span = (Tokens::ISLAND_EXPANDED_H - Tokens::ISLAND_COMPACT_H).max(1.0);
         let h_t = ((self.current_h - Tokens::ISLAND_COMPACT_H) / h_span).clamp(0.0, 1.0);
@@ -1198,6 +1209,7 @@ impl IslandWidget {
             wallpaper_crop: None,
             start_time: Instant::now(),
             style_mode,
+            app_backdrop_solid: true,
             theme_mode,
             blur_radius,
             anim_speed,
@@ -1860,6 +1872,7 @@ impl IslandWidget {
         // Global defaults
         root_val["theme_mode"] = serde_json::json!(self.theme_mode);
         root_val["style_mode"] = serde_json::json!(self.style_mode);
+        root_val["app_backdrop_solid"] = serde_json::json!(self.app_backdrop_solid);
         root_val["blur_radius"] = serde_json::json!(self.blur_radius);
         root_val["animation_speed"] = serde_json::json!(self.anim_speed);
 
@@ -2020,6 +2033,16 @@ impl IslandWidget {
                     self.style_mode = (self.style_mode + 1.0) % 3.0;
                     self.needs_redraw = true;
                     style_changed = Some(self.style_mode);
+                    self.save_config();
+                }
+                IslandIpcEvent::ToggleAppBackdrop => {
+                    self.app_backdrop_solid = !self.app_backdrop_solid;
+                    self.needs_redraw = true;
+                    self.save_config();
+                }
+                IslandIpcEvent::SetAppBackdrop(v) => {
+                    self.app_backdrop_solid = v;
+                    self.needs_redraw = true;
                     self.save_config();
                 }
                 IslandIpcEvent::SetTheme(t) => {
@@ -3724,6 +3747,53 @@ impl IslandWidget {
                 let cur_lx = self.cursor_pos[0] * (self.width as f32);
                 let cur_ly = self.cursor_pos[1] * (self.height as f32);
 
+                // Top-right header pill: toggle solid dark/light background when above apps
+                let ab_label = if self.app_backdrop_solid {
+                    "App BG: Solid"
+                } else {
+                    "App BG: Glass"
+                };
+                let ab_cx = cx + island_w * 0.5 - 70.0;
+                let ab_cy = island_top + 22.0;
+                let ab_hw = 44.0;
+                let ab_hover = self.is_hovered
+                    && (cur_lx - ab_cx).abs() <= ab_hw
+                    && (cur_ly - ab_cy).abs() <= 11.0;
+                let ab_bg = if self.app_backdrop_solid {
+                    if is_light {
+                        [0, 0, 0, if ab_hover { 34 } else { 22 }]
+                    } else {
+                        [255, 255, 255, if ab_hover { 48 } else { 32 }]
+                    }
+                } else if is_light {
+                    [0, 0, 0, if ab_hover { 20 } else { 10 }]
+                } else {
+                    [255, 255, 255, if ab_hover { 28 } else { 14 }]
+                };
+                UIFont::draw_rounded_rect_fill(
+                    buf,
+                    self.width,
+                    self.height,
+                    ab_cx,
+                    ab_cy,
+                    ab_hw,
+                    10.5,
+                    10.5,
+                    ab_bg,
+                );
+                self.font.draw_text_centered(
+                    buf,
+                    self.width,
+                    self.height,
+                    ab_label,
+                    ab_cx,
+                    ab_cy,
+                    Tokens::TYPE_CAPTION - 1.0,
+                    if self.app_backdrop_solid { col_ink } else { col_dim },
+                    col_shadow,
+                    FontWeight::SemiBold,
+                );
+
                 let toggles = [
                     ("Wi-Fi", self.sys_stats.wifi_enabled),
                     ("Bluetooth", self.sys_stats.bt_enabled),
@@ -4378,6 +4448,7 @@ impl IslandWidget {
         let is_light = if self.effective_is_light() { 1.0 } else { 0.0 };
         let current_fillet = self.current_fillet_radius();
 
+        let eff_style = self.effective_style_mode();
         if let Some(renderer) = &mut self.renderer {
             if self.current_alpha <= 0.01 {
                 let _ = renderer.render(&[]);
@@ -4414,7 +4485,7 @@ impl IslandWidget {
                 .blur(self.blur_radius)
                 .specular(1.10)
                 .fresnel(0.60)
-                .style_mode(self.style_mode)
+                .style_mode(eff_style)
                 .tint(
                     if self.music.is_playing { 1.0 } else { 0.0 },
                     if self.is_pressed { 1.0 } else { 0.0 },
@@ -4589,6 +4660,14 @@ impl IslandWidget {
                 self.set_mode(return_mode);
             }
             IslandMode::ControlCenter => {
+                let ab_cx = island_cx + island_w * 0.5 - 70.0;
+                let ab_cy = island_top + 22.0;
+                if (lx - ab_cx).abs() <= 46.0 && (ly - ab_cy).abs() <= 13.0 {
+                    self.app_backdrop_solid = !self.app_backdrop_solid;
+                    self.needs_redraw = true;
+                    self.save_config();
+                    return;
+                }
                 let tog_w = (island_w - 52.0) / 4.0;
                 let tog_start_x = island_cx - island_w * 0.5 + 26.0 + tog_w * 0.5;
                 let tog_y = island_top + 56.0;
@@ -4885,6 +4964,12 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
                             send_evt(IslandIpcEvent::SetStyle(2.0));
                         } else if trimmed == "style" || trimmed == "style cycle" {
                             send_evt(IslandIpcEvent::CycleStyle);
+                        } else if trimmed == "app_backdrop" || trimmed == "app_bg" {
+                            send_evt(IslandIpcEvent::ToggleAppBackdrop);
+                        } else if trimmed == "app_backdrop on" || trimmed == "app_bg on" {
+                            send_evt(IslandIpcEvent::SetAppBackdrop(true));
+                        } else if trimmed == "app_backdrop off" || trimmed == "app_bg off" {
+                            send_evt(IslandIpcEvent::SetAppBackdrop(false));
                         } else if trimmed == "theme auto"
                             || trimmed == "auto"
                             || trimmed == "theme 0"
