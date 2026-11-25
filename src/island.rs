@@ -24,7 +24,7 @@ use wayland_client::{Dispatch, Proxy, QueueHandle};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 
 const FIFO_PATH: &str = "/tmp/liquid_island.fifo";
-pub const COMPACT_PILL_W: f32 = 270.0;
+pub const COMPACT_PILL_W: f32 = 238.0;
 
 struct WindowCache {
     last_check: Instant,
@@ -247,6 +247,7 @@ pub enum IslandMode {
     CompactPill,
     MusicExpanded,
     Notification,
+    ControlCenter,
     QuickAccess,
     SystemOverview,
     PowerMenu,
@@ -287,6 +288,10 @@ pub struct SysStats {
     pub vol_muted: bool,
     pub brightness_pct: u32,
     pub is_online: bool,
+    pub wifi_enabled: bool,
+    pub bt_enabled: bool,
+    pub cpu_temp_c: u32,
+    pub disk_pct: u32,
     prev_idle: u64,
     prev_total: u64,
     last_poll: Instant,
@@ -306,6 +311,10 @@ impl SysStats {
             vol_muted: false,
             brightness_pct: 50,
             is_online: true,
+            wifi_enabled: true,
+            bt_enabled: false,
+            cpu_temp_c: 0,
+            disk_pct: 0,
             prev_idle: 0,
             prev_total: 0,
             last_poll: Instant::now() - Duration::from_secs(5),
@@ -406,6 +415,48 @@ impl SysStats {
                     let total_sec = sec as u32;
                     self.uptime_hrs = total_sec / 3600;
                     self.uptime_mins = (total_sec % 3600) / 60;
+                }
+            }
+        }
+
+        // Sample Wi-Fi & Bluetooth rfkill/sysfs state (non-blocking)
+        self.wifi_enabled = self.is_online
+            || std::fs::read_to_string("/sys/class/net/wlan0/operstate")
+                .map(|s| s.trim() == "up")
+                .unwrap_or(false);
+        self.bt_enabled = (0..6).any(|idx| {
+            let base = format!("/sys/class/rfkill/rfkill{}", idx);
+            let is_bt = std::fs::read_to_string(format!("{}/type", base))
+                .map(|s| s.trim() == "bluetooth")
+                .unwrap_or(false);
+            let soft_unblocked = std::fs::read_to_string(format!("{}/soft", base))
+                .map(|s| s.trim() == "0")
+                .unwrap_or(false);
+            is_bt && soft_unblocked
+        });
+
+        // Sample CPU package temperature (millidegrees C -> C)
+        for z in 0..4 {
+            let p = format!("/sys/class/thermal/thermal_zone{}/temp", z);
+            if let Ok(s) = std::fs::read_to_string(&p) {
+                if let Ok(mc) = s.trim().parse::<u32>() {
+                    if mc > 1000 {
+                        self.cpu_temp_c = mc / 1000;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Sample root disk usage percentage via df -P /
+        if let Ok(out) = std::process::Command::new("df").args(["-P", "/"]).output() {
+            if let Ok(txt) = String::from_utf8(out.stdout) {
+                if let Some(line) = txt.lines().nth(1) {
+                    if let Some(pct_tok) = line.split_whitespace().nth(4) {
+                        if let Ok(p) = pct_tok.trim_end_matches('%').parse::<u32>() {
+                            self.disk_pct = p.min(100);
+                        }
+                    }
                 }
             }
         }
@@ -1345,9 +1396,10 @@ impl IslandWidget {
     fn page_index(mode: IslandMode) -> Option<usize> {
         match mode {
             IslandMode::MusicExpanded => Some(0),
-            IslandMode::SystemOverview => Some(1),
-            IslandMode::QuickAccess => Some(2),
-            IslandMode::PowerMenu => Some(3),
+            IslandMode::ControlCenter => Some(1),
+            IslandMode::SystemOverview => Some(2),
+            IslandMode::QuickAccess => Some(3),
+            IslandMode::PowerMenu => Some(4),
             IslandMode::Notification => None,
             _ => None,
         }
@@ -1365,8 +1417,8 @@ impl IslandWidget {
             (Self::page_index(old_mode), Self::page_index(new_mode))
         {
             if from_idx != to_idx {
-                let dir = if (to_idx > from_idx && !(from_idx == 0 && to_idx == 3))
-                    || (from_idx == 3 && to_idx == 0)
+                let dir = if (to_idx > from_idx && !(from_idx == 0 && to_idx == 4))
+                    || (from_idx == 4 && to_idx == 0)
                 {
                     1.0f32
                 } else {
@@ -1402,6 +1454,7 @@ impl IslandWidget {
                 self.target_alpha = 1.0;
             }
             IslandMode::MusicExpanded
+            | IslandMode::ControlCenter
             | IslandMode::QuickAccess
             | IslandMode::SystemOverview
             | IslandMode::PowerMenu => {
@@ -1423,7 +1476,8 @@ impl IslandWidget {
     fn cycle_mode_forward(&mut self) {
         let next = match self.mode {
             IslandMode::Hidden | IslandMode::CompactPill => IslandMode::MusicExpanded,
-            IslandMode::MusicExpanded => IslandMode::SystemOverview,
+            IslandMode::MusicExpanded => IslandMode::ControlCenter,
+            IslandMode::ControlCenter => IslandMode::SystemOverview,
             IslandMode::SystemOverview => IslandMode::QuickAccess,
             IslandMode::QuickAccess => IslandMode::PowerMenu,
             IslandMode::PowerMenu => IslandMode::CompactPill,
@@ -1436,10 +1490,11 @@ impl IslandWidget {
         let prev = match self.mode {
             IslandMode::Hidden | IslandMode::CompactPill => IslandMode::PowerMenu,
             IslandMode::MusicExpanded => IslandMode::CompactPill,
-            IslandMode::SystemOverview => IslandMode::MusicExpanded,
+            IslandMode::ControlCenter => IslandMode::MusicExpanded,
+            IslandMode::SystemOverview => IslandMode::ControlCenter,
             IslandMode::QuickAccess => IslandMode::SystemOverview,
             IslandMode::PowerMenu => IslandMode::QuickAccess,
-            IslandMode::Notification => IslandMode::QuickAccess,
+            IslandMode::Notification => IslandMode::ControlCenter,
         };
         self.set_mode(prev);
     }
@@ -2507,10 +2562,10 @@ impl IslandWidget {
         is_light: bool,
         active_idx: usize,
     ) {
-        let dot_start_x = island_cx + island_w * 0.5 - 65.0;
+        let dot_start_x = island_cx + island_w * 0.5 - 76.0;
         let dot_y = island_top + 22.0;
 
-        for i in 0..4 {
+        for i in 0..5 {
             let dx = dot_start_x + (i as f32) * 11.0;
             let (half_r, col) = if i == active_idx {
                 (
@@ -2628,177 +2683,116 @@ impl IslandWidget {
                         );
                     }
                 } else {
-                    // ── Apple Dynamic Island — Premium Minimal Idle Pill ──
-                    // Layout: [ clock ] | [ bat_icon  bat% ]
-                    // All text properly vertically centered via draw_text_centered_y
-
+                    // ── Sleek Dynamic Island Idle Pill (edge-balanced 238px capsule) ──
                     let now = chrono::Local::now();
                     use chrono::Timelike;
                     let (_is_pm, hour) = now.hour12();
                     let min = now.minute();
                     let ampm = if now.hour() >= 12 { "PM" } else { "AM" };
-                    let hour_str = format!("{}", hour);
-                    let min_str = format!("{:02}", min);
-                    let colon_str = ":";
+                    let time_main = format!("{}:{:02}", hour, min);
 
-                    // Size config
-                    let sz_time = 14.0f32; // big time digits
-                    let sz_ampm = 9.5f32; // small AM/PM label
-                    let sz_bat = 12.5f32; // battery percentage
+                    let sz_time = 13.5f32;
+                    let sz_ampm = 9.0f32;
+                    let sz_bat = 12.0f32;
 
-                    // Measure widths for precise layout
-                    let w_hour = self.font.measure_text(&hour_str, sz_time, FontWeight::Bold);
-                    let w_colon = self.font.measure_text(colon_str, sz_time, FontWeight::Bold);
-                    let w_min = self.font.measure_text(&min_str, sz_time, FontWeight::Bold);
-                    let w_ampm = self.font.measure_text(ampm, sz_ampm, FontWeight::SemiBold);
-                    let bat_pct = self.sys_stats.bat_pct;
-                    let bat_pct_str = format!("{}%", bat_pct);
-                    let w_bat_txt =
-                        self.font
-                            .measure_text(&bat_pct_str, sz_bat, FontWeight::SemiBold);
-                    let w_bat_icon = 20.0f32; // battery icon width
-                    let gap_bat = 4.0f32; // gap between icon and text
-
-                    // Total widths of left and right groups
-                    let time_total_w = w_hour + w_colon + w_min + 4.0 + w_ampm; // 4px gap before AM/PM
-                    let bat_total_w = w_bat_icon + gap_bat + w_bat_txt;
-
-                    // Divider x = center of pill
-                    let divider_x = island_cx;
-                    let padding = 16.0f32;
-
-                    // --- LEFT: Clock, right-aligned to divider ---
-                    let time_right = divider_x - padding;
-                    let time_left = time_right - time_total_w;
-
-                    // Colors
-                    let col_primary = col_ink;
                     let col_secondary = if is_light {
-                        [8, 12, 20, 160]
+                        [8, 12, 20, 165]
                     } else {
-                        [245, 247, 250, 160]
+                        [245, 247, 250, 165]
                     };
                     let no_shadow = [0u8, 0, 0, 0];
 
-                    // Hour
-                    let mut px = time_left;
+                    // Left-aligned time anchored cleanly inside left capsule curve (+20px)
+                    let pill_left = island_cx - island_w * 0.5 + 20.0;
+                    let w_main = self
+                        .font
+                        .measure_text(&time_main, sz_time, FontWeight::Bold);
                     self.font.draw_text_centered_y(
                         buf,
                         self.width,
                         self.height,
-                        &hour_str,
-                        px,
+                        &time_main,
+                        pill_left,
                         island_cy,
                         sz_time,
-                        col_primary,
+                        col_ink,
                         no_shadow,
                         FontWeight::Bold,
                     );
-                    px += w_hour;
-
-                    // Colon (slightly dimmed, optically centered)
-                    self.font.draw_text_centered_y(
-                        buf,
-                        self.width,
-                        self.height,
-                        colon_str,
-                        px,
-                        island_cy - 0.5,
-                        sz_time,
-                        col_secondary,
-                        no_shadow,
-                        FontWeight::Bold,
-                    );
-                    px += w_colon;
-
-                    // Minutes
-                    self.font.draw_text_centered_y(
-                        buf,
-                        self.width,
-                        self.height,
-                        &min_str,
-                        px,
-                        island_cy,
-                        sz_time,
-                        col_primary,
-                        no_shadow,
-                        FontWeight::Bold,
-                    );
-                    px += w_min + 4.0;
-
-                    // AM/PM — small, dimmed, vertically shifted up slightly
                     self.font.draw_text_centered_y(
                         buf,
                         self.width,
                         self.height,
                         ampm,
-                        px,
-                        island_cy - 3.5,
+                        pill_left + w_main + 3.5,
+                        island_cy + 0.5,
                         sz_ampm,
                         col_secondary,
                         no_shadow,
                         FontWeight::SemiBold,
                     );
 
-                    // --- THIN DIVIDER LINE at center ---
-                    let div_col = if is_light {
-                        [0u8, 0, 0, 40]
+                    // Subtle status dot (online/charging) near center-right
+                    let dot_col = if self.sys_stats.bat_charging {
+                        [52, 199, 89, 220]
+                    } else if !self.sys_stats.is_online {
+                        [255, 149, 10, 200]
+                    } else if is_light {
+                        [0, 0, 0, 45]
                     } else {
-                        [255u8, 255, 255, 30]
+                        [255, 255, 255, 55]
                     };
                     UIFont::draw_rounded_rect_fill(
                         buf,
                         self.width,
                         self.height,
-                        divider_x,
+                        island_cx + 12.0,
                         island_cy,
-                        0.5,
-                        7.0,
-                        0.5,
-                        div_col,
+                        2.0,
+                        2.0,
+                        2.0,
+                        dot_col,
                     );
 
-                    // --- RIGHT: Battery, left-aligned from divider ---
-                    let bat_left = divider_x + padding;
-                    let bat_text_col = if self.sys_stats.bat_charging {
-                        [52u8, 199, 89, 255] // Apple Emerald
-                    } else if bat_pct < 20 {
-                        [255u8, 149, 10, 255] // Amber warning
+                    // Right-aligned battery % + crisp capsule icon anchored at right (-20px)
+                    let bat_pct = self.sys_stats.bat_pct;
+                    let bat_pct_str = format!("{}%", bat_pct);
+                    let w_bat_txt =
+                        self.font
+                            .measure_text(&bat_pct_str, sz_bat, FontWeight::SemiBold);
+                    let pill_right = island_cx + island_w * 0.5 - 20.0;
+                    let bat_icon_cx = pill_right - 9.0;
+                    let bat_txt_x = bat_icon_cx - 12.0 - w_bat_txt;
+
+                    // Keep text crisp white (or amber if critically low) — never muddy green!
+                    let bat_txt_col = if bat_pct < 20 && !self.sys_stats.bat_charging {
+                        [255, 149, 10, 255]
                     } else {
-                        col_primary
-                    };
-                    let bat_icon_col = if self.sys_stats.bat_charging {
-                        [52u8, 199, 89, 220]
-                    } else {
-                        col_secondary
+                        col_ink
                     };
 
-                    // Battery icon (left of text)
-                    UIFont::draw_battery_icon(
-                        buf,
-                        self.width,
-                        self.height,
-                        bat_left + w_bat_icon * 0.5,
-                        island_cy,
-                        bat_pct,
-                        self.sys_stats.bat_charging,
-                        bat_icon_col,
-                    );
-
-                    // Percentage text
                     self.font.draw_text_centered_y(
                         buf,
                         self.width,
                         self.height,
                         &bat_pct_str,
-                        bat_left + w_bat_icon + gap_bat,
+                        bat_txt_x,
                         island_cy,
                         sz_bat,
-                        bat_text_col,
+                        bat_txt_col,
                         no_shadow,
                         FontWeight::SemiBold,
                     );
-                    let _ = bat_total_w; // used for layout reference
+                    UIFont::draw_battery_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        bat_icon_cx,
+                        island_cy,
+                        bat_pct,
+                        self.sys_stats.bat_charging,
+                        col_ink,
+                    );
                 }
             }
             IslandMode::Hidden => {}
@@ -3351,6 +3345,209 @@ impl IslandWidget {
                     );
                 }
             }
+            IslandMode::ControlCenter => {
+                // Header
+                self.font.draw_text(
+                    buf,
+                    self.width,
+                    self.height,
+                    "CONTROL CENTER",
+                    cx - island_w * 0.5 + 32.0,
+                    island_top + 24.0,
+                    Tokens::TYPE_CAPTION,
+                    col_dim,
+                    FontWeight::Bold,
+                );
+
+                let cur_lx = self.cursor_pos[0] * (self.width as f32);
+                let cur_ly = self.cursor_pos[1] * (self.height as f32);
+
+                // Row 1: 4 Interactive Quick Toggles (Wi-Fi, Bluetooth, Output, Mute)
+                let toggles = [
+                    ("Wi-Fi", self.sys_stats.wifi_enabled, [52u8, 199, 89, 210]),
+                    (
+                        "Bluetooth",
+                        self.sys_stats.bt_enabled,
+                        [10u8, 132, 255, 220],
+                    ),
+                    ("Audio Out", false, [160u8, 175, 200, 180]),
+                    (
+                        if self.sys_stats.vol_muted {
+                            "Muted"
+                        } else {
+                            "Sound"
+                        },
+                        self.sys_stats.vol_muted,
+                        [255u8, 149, 10, 220],
+                    ),
+                ];
+                let tog_w = (island_w - 52.0) / 4.0;
+                let tog_start_x = cx - island_w * 0.5 + 26.0 + tog_w * 0.5;
+                let tog_y = island_top + 56.0;
+
+                for (idx, (label, is_on, accent)) in toggles.iter().enumerate() {
+                    let tx = tog_start_x + (idx as f32) * tog_w;
+                    let hovered = self.is_hovered
+                        && (cur_lx - tx).abs() <= (tog_w - 8.0) * 0.5
+                        && (cur_ly - tog_y).abs() <= 14.0;
+                    let bg = if *is_on {
+                        [
+                            accent[0],
+                            accent[1],
+                            accent[2],
+                            if hovered { 75 } else { 52 },
+                        ]
+                    } else if hovered {
+                        if is_light {
+                            Tokens::INNER_TILE_BG_HOVER_LIGHT
+                        } else {
+                            Tokens::INNER_TILE_BG_HOVER_DARK
+                        }
+                    } else if is_light {
+                        Tokens::INNER_TILE_BG_LIGHT
+                    } else {
+                        Tokens::INNER_TILE_BG_DARK
+                    };
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        tx,
+                        tog_y,
+                        (tog_w - 8.0) * 0.5,
+                        14.0,
+                        10.0,
+                        bg,
+                    );
+                    let dot_c = if *is_on {
+                        *accent
+                    } else if is_light {
+                        [0, 0, 0, 50]
+                    } else {
+                        [255, 255, 255, 65]
+                    };
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        tx - (tog_w - 8.0) * 0.5 + 11.0,
+                        tog_y,
+                        2.5,
+                        2.5,
+                        2.5,
+                        dot_c,
+                    );
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        label,
+                        tx + 5.0,
+                        tog_y,
+                        Tokens::TYPE_CAPTION,
+                        col_ink,
+                        col_shadow,
+                        FontWeight::SemiBold,
+                    );
+                }
+
+                // Row 2 & 3: Interactive Volume & Brightness Sliders
+                let slider_left = cx - island_w * 0.5 + 54.0;
+                let slider_right = cx + island_w * 0.5 - 66.0;
+                let slider_w = (slider_right - slider_left).max(80.0);
+                let slider_cx = (slider_left + slider_right) * 0.5;
+
+                let sliders = [
+                    (
+                        island_top + 92.0,
+                        self.sys_stats.vol_pct as f32 / 100.0,
+                        format!("{}%", self.sys_stats.vol_pct),
+                        true,
+                    ),
+                    (
+                        island_top + 122.0,
+                        self.sys_stats.brightness_pct as f32 / 100.0,
+                        format!("{}%", self.sys_stats.brightness_pct),
+                        false,
+                    ),
+                ];
+
+                for (sy, ratio, pct_str, is_vol) in sliders {
+                    let icon_x = cx - island_w * 0.5 + 34.0;
+                    if is_vol {
+                        Self::draw_speaker_icon(
+                            buf,
+                            self.width,
+                            self.height,
+                            icon_x,
+                            sy,
+                            col_ink,
+                            !self.sys_stats.vol_muted && self.sys_stats.vol_pct > 0,
+                        );
+                    } else {
+                        Self::draw_brightness_icon(
+                            buf,
+                            self.width,
+                            self.height,
+                            icon_x,
+                            sy,
+                            col_ink,
+                        );
+                    }
+
+                    let track_bg = if is_light {
+                        [0, 0, 0, 26]
+                    } else {
+                        [255, 255, 255, 28]
+                    };
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        slider_cx,
+                        sy,
+                        slider_w * 0.5,
+                        5.0,
+                        5.0,
+                        track_bg,
+                    );
+
+                    let clamped = ratio.clamp(0.04, 1.0);
+                    let fill_w = slider_w * clamped;
+                    let fill_cx = slider_left + fill_w * 0.5;
+                    let fill_col = if is_vol && self.sys_stats.vol_muted {
+                        [255, 149, 10, 220]
+                    } else if is_light {
+                        [24, 30, 42, 235]
+                    } else {
+                        [245, 248, 255, 240]
+                    };
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        fill_cx,
+                        sy,
+                        fill_w * 0.5,
+                        5.0,
+                        5.0,
+                        fill_col,
+                    );
+
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        &pct_str,
+                        slider_right + 14.0,
+                        sy,
+                        Tokens::TYPE_CAPTION,
+                        col_dim,
+                        col_shadow,
+                        FontWeight::SemiBold,
+                    );
+                }
+            }
             IslandMode::SystemOverview => {
                 // Header
                 self.font.draw_text(
@@ -3365,11 +3562,19 @@ impl IslandWidget {
                     FontWeight::Bold,
                 );
 
-                // 4 Metric cards: CPU, RAM, Battery, Uptime
+                // 4 Metric cards with live progress bars: CPU (+Temp), RAM, Battery, Disk
+                let ram_ratio = (self.sys_stats.ram_used_gb / self.sys_stats.ram_total_gb.max(0.1))
+                    .clamp(0.0, 1.0);
+                let cpu_lbl = if self.sys_stats.cpu_temp_c > 0 {
+                    format!("CPU {}°C", self.sys_stats.cpu_temp_c)
+                } else {
+                    "CPU".to_string()
+                };
                 let stat_items = [
                     (
-                        "CPU",
+                        cpu_lbl,
                         format!("{}%", self.sys_stats.cpu_pct),
+                        self.sys_stats.cpu_pct as f32 / 100.0,
                         if self.sys_stats.cpu_pct > 80 {
                             Tokens::STATUS_RED
                         } else {
@@ -3377,13 +3582,15 @@ impl IslandWidget {
                         },
                     ),
                     (
-                        "RAM",
+                        "RAM".to_string(),
                         format!("{:.1}G", self.sys_stats.ram_used_gb),
-                        Tokens::ACCENT,
+                        ram_ratio,
+                        [175, 130, 255, 255],
                     ),
                     (
-                        "BATTERY",
+                        "BATTERY".to_string(),
                         format!("{}%", self.sys_stats.bat_pct),
+                        self.sys_stats.bat_pct as f32 / 100.0,
                         if self.sys_stats.bat_pct <= 20 {
                             Tokens::STATUS_AMBER
                         } else if self.sys_stats.bat_charging {
@@ -3393,12 +3600,13 @@ impl IslandWidget {
                         },
                     ),
                     (
-                        "UPTIME",
                         format!(
-                            "{}h {}m",
+                            "DISK · {}h{}m",
                             self.sys_stats.uptime_hrs, self.sys_stats.uptime_mins
                         ),
-                        Tokens::ACCENT,
+                        format!("{}%", self.sys_stats.disk_pct),
+                        self.sys_stats.disk_pct as f32 / 100.0,
+                        [100, 210, 255, 255],
                     ),
                 ];
 
@@ -3406,7 +3614,7 @@ impl IslandWidget {
                 let start_x = cx - island_w * 0.5 + 26.0 + item_w * 0.5;
                 let cy = island_top + 78.0;
 
-                for (idx, (lbl, val, _accent)) in stat_items.iter().enumerate() {
+                for (idx, (lbl, val, ratio, accent)) in stat_items.iter().enumerate() {
                     let cx = start_x + (idx as f32) * item_w;
 
                     // Container pill: subtle 7% white fill (NO wireframe outline!)
@@ -3494,11 +3702,44 @@ impl IslandWidget {
                         self.height,
                         lbl,
                         cx,
-                        cy + 20.0,
-                        Tokens::TYPE_CAPTION - 0.5,
+                        cy + 18.0,
+                        Tokens::TYPE_CAPTION - 1.0,
                         col_dim,
                         col_shadow,
                         FontWeight::Medium,
+                    );
+
+                    // Mini progress bar at bottom of card (Tide-Island System Glance style)
+                    let bar_w = item_w - 24.0;
+                    let bar_y = cy + 25.5;
+                    let track_c = if is_light {
+                        [0, 0, 0, 28]
+                    } else {
+                        [255, 255, 255, 28]
+                    };
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        cx,
+                        bar_y,
+                        bar_w * 0.5,
+                        1.5,
+                        1.5,
+                        track_c,
+                    );
+                    let fill_w = (bar_w * ratio.clamp(0.06, 1.0)).max(3.0);
+                    let fill_cx = (cx - bar_w * 0.5) + fill_w * 0.5;
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        fill_cx,
+                        bar_y,
+                        fill_w * 0.5,
+                        1.5,
+                        1.5,
+                        *accent,
                     );
                 }
             }
@@ -3949,6 +4190,75 @@ impl IslandWidget {
                 };
                 self.set_mode(return_mode);
             }
+            IslandMode::ControlCenter => {
+                let tog_w = (island_w - 52.0) / 4.0;
+                let tog_start_x = island_cx - island_w * 0.5 + 26.0 + tog_w * 0.5;
+                let tog_y = island_top + 56.0;
+                if (ly - tog_y).abs() <= 15.0 {
+                    for idx in 0..4 {
+                        let tx = tog_start_x + (idx as f32) * tog_w;
+                        if (lx - tx).abs() <= (tog_w - 8.0) * 0.5 {
+                            match idx {
+                                0 => {
+                                    let target = if self.sys_stats.wifi_enabled {
+                                        "off"
+                                    } else {
+                                        "on"
+                                    };
+                                    let _ = Command::new("nmcli")
+                                        .args(["radio", "wifi", target])
+                                        .spawn();
+                                    self.sys_stats.wifi_enabled = !self.sys_stats.wifi_enabled;
+                                }
+                                1 => {
+                                    let target = if self.sys_stats.bt_enabled {
+                                        "off"
+                                    } else {
+                                        "on"
+                                    };
+                                    let _ = Command::new("bluetoothctl")
+                                        .args(["power", target])
+                                        .spawn();
+                                    self.sys_stats.bt_enabled = !self.sys_stats.bt_enabled;
+                                }
+                                2 => {
+                                    self.toggle_audio_sink();
+                                }
+                                _ => {
+                                    let _ = Command::new("wpctl")
+                                        .args(["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
+                                        .spawn();
+                                    self.sys_stats.vol_muted = !self.sys_stats.vol_muted;
+                                }
+                            }
+                            self.needs_redraw = true;
+                            return;
+                        }
+                    }
+                }
+
+                let slider_left = island_cx - island_w * 0.5 + 54.0;
+                let slider_right = island_cx + island_w * 0.5 - 66.0;
+                let slider_w = (slider_right - slider_left).max(80.0);
+                if lx >= slider_left - 10.0 && lx <= slider_right + 10.0 {
+                    let ratio = ((lx - slider_left) / slider_w).clamp(0.0, 1.0);
+                    if (ly - (island_top + 92.0)).abs() <= 14.0 {
+                        let pct = (ratio * 100.0).round() as u32;
+                        let arg = format!("{}%", pct);
+                        let _ = Command::new("wpctl")
+                            .args(["set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", &arg])
+                            .spawn();
+                        self.sys_stats.vol_pct = pct;
+                        self.needs_redraw = true;
+                    } else if (ly - (island_top + 122.0)).abs() <= 14.0 {
+                        let pct = (ratio * 100.0).round().max(5.0) as u32;
+                        let arg = format!("{}%", pct);
+                        let _ = Command::new("brightnessctl").args(["set", &arg]).spawn();
+                        self.sys_stats.brightness_pct = pct;
+                        self.needs_redraw = true;
+                    }
+                }
+            }
             IslandMode::QuickAccess => {
                 let app_count = self.quick_access.len().max(1);
                 let item_w = (island_w - 50.0) / (app_count as f32);
@@ -4114,6 +4424,13 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
                             || trimmed == "slide:power"
                         {
                             send_evt(IslandIpcEvent::ShowMode(IslandMode::PowerMenu));
+                        } else if trimmed == "control"
+                            || trimmed == "control_center"
+                            || trimmed == "cc"
+                            || trimmed == "slide_control"
+                            || trimmed == "slide:control"
+                        {
+                            send_evt(IslandIpcEvent::ShowMode(IslandMode::ControlCenter));
                         } else if trimmed == "apps"
                             || trimmed == "quick"
                             || trimmed == "slide_apps"
