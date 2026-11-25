@@ -198,6 +198,7 @@ pub struct ClockWidget {
     // Modular box grid (4 pinned + expandable More + customizable order/visibility)
     pub box_configs: Vec<ClockBoxConfig>,
     pub show_more: bool,
+    pub more_spring: Spring,
     pub customizing: bool,
 
     // Attachment mode (right-click cycle)
@@ -366,6 +367,16 @@ impl ClockWidget {
 
             box_configs: ClockBoxConfig::defaults(),
             show_more: false,
+            more_spring: Spring::with_params(
+                0.0,
+                SpringParams {
+                    stiffness: 280.0,
+                    damping: 28.0,
+                    mass: 0.9,
+                    initial_velocity: 0.0,
+                    epsilon: 0.002,
+                },
+            ),
             customizing: false,
 
             dock_mode: crate::island::IslandDockMode::AttachedCurved,
@@ -582,7 +593,7 @@ impl ClockWidget {
             .enumerate()
             .filter(|(_, b)| b.enabled)
             .collect();
-        if self.show_more {
+        if self.show_more || self.more_spring.value > 0.02 {
             enabled
         } else {
             enabled.into_iter().take(4).collect()
@@ -599,15 +610,29 @@ impl ClockWidget {
         let col = slot % 2;
         let row = slot / 2;
         let tcx = if col == 0 { cx - 86.0 } else { cx + 86.0 };
-        let tcy = card_top + 74.0 + (row as f32) * 144.0 + slide_y;
+        let base_y = card_top + 74.0 + (row as f32) * 144.0;
+        let tcy = if slot >= 4 {
+            let m = self.more_spring.value.clamp(0.0, 1.0);
+            let origin_y = card_top + 218.0;
+            origin_y + (base_y - origin_y) * m + slide_y
+        } else {
+            base_y + slide_y
+        };
         (tcx, tcy)
     }
 
     fn footer_bar_y(&self, slide_y: f32) -> f32 {
         let card_top = self.dock_mode.dock_y();
         let count = self.visible_boxes().len().max(1);
-        let rows = count.div_ceil(2);
-        card_top + (rows as f32) * 144.0 + 16.0 + slide_y
+        let full_rows = count.div_ceil(2) as f32;
+        let pinned_rows = full_rows.min(2.0);
+        let m = if self.customizing {
+            1.0
+        } else {
+            self.more_spring.value.clamp(0.0, 1.0)
+        };
+        let eff_rows = pinned_rows + (full_rows - pinned_rows) * m;
+        card_top + eff_rows * 144.0 + 16.0 + slide_y
     }
 
     fn active_panel_h(&self) -> f32 {
@@ -621,6 +646,7 @@ impl ClockWidget {
             self.is_compact = true;
             self.customizing = false;
             self.show_more = false;
+            self.more_spring.set_target(0.0);
             self.hovered_tab = None;
             self.hovered_row = None;
             self.size_spring.set_target(0.0);
@@ -850,6 +876,8 @@ impl ClockWidget {
                         && (px - (cx_mid - 58.0)).abs() <= 48.0
                     {
                         self.show_more = !self.show_more;
+                        self.more_spring
+                            .set_target(if self.show_more { 1.0 } else { 0.0 });
                         self.needs_input_region_update = true;
                         self.needs_redraw = true;
                         return true;
@@ -858,6 +886,7 @@ impl ClockWidget {
                         self.customizing = !self.customizing;
                         if self.customizing {
                             self.show_more = true;
+                            self.more_spring.set_target(1.0);
                         } else {
                             self.save_config();
                         }
@@ -1052,6 +1081,7 @@ impl ClockWidget {
                     if v > 0.5 || h > 0.5 || vertical.discrete > 0 {
                         if !self.show_more && self.enabled_box_count() > 4 {
                             self.show_more = true;
+                            self.more_spring.set_target(1.0);
                             self.needs_input_region_update = true;
                             self.needs_redraw = true;
                         }
@@ -1060,6 +1090,7 @@ impl ClockWidget {
                         && !self.customizing
                     {
                         self.show_more = false;
+                        self.more_spring.set_target(0.0);
                         self.needs_input_region_update = true;
                         self.needs_redraw = true;
                     }
@@ -1072,9 +1103,12 @@ impl ClockWidget {
 
     pub fn update_physics(&mut self, dt: f32) -> bool {
         if self.power_save {
-            let changed = !self.size_spring.is_at_rest() || !self.page_spring.is_at_rest();
+            let changed = !self.size_spring.is_at_rest()
+                || !self.page_spring.is_at_rest()
+                || !self.more_spring.is_at_rest();
             self.size_spring.snap_to_target();
             self.page_spring.snap_to_target();
+            self.more_spring.snap_to_target();
             let t = self.size_spring.value.clamp(0.0, 1.0);
             self.target_w = CARD_W;
             self.target_h = CARD_H;
@@ -1098,6 +1132,12 @@ impl ClockWidget {
             && self.page_spring.velocity.abs() < 0.01
         {
             self.page_spring.snap_to_target();
+        }
+        self.more_spring.update(eff_dt);
+        if (self.more_spring.value - self.more_spring.target).abs() < 0.002
+            && self.more_spring.velocity.abs() < 0.01
+        {
+            self.more_spring.snap_to_target();
         }
 
         let t = self.size_spring.value.clamp(0.0, 1.0);
@@ -1131,6 +1171,7 @@ impl ClockWidget {
 
         !self.size_spring.is_at_rest()
             || !self.page_spring.is_at_rest()
+            || !self.more_spring.is_at_rest()
             || self.power_held.is_some()
             || self.power_hold_progress > 0.001
     }
@@ -1329,9 +1370,15 @@ impl ClockWidget {
             let tile_r = 18.0f32;
             let vis_boxes = self.visible_boxes();
 
+            let more_m = if self.customizing {
+                1.0
+            } else {
+                self.more_spring.value.clamp(0.0, 1.0)
+            };
             for (slot, (_, cfg)) in vis_boxes.iter().enumerate() {
                 let (tcx, tcy) = self.box_center(slot, slide_y);
-                let box_alpha = if !cfg.enabled { 0.45 } else { 1.0 };
+                let extra_fade = if slot >= 4 { more_m } else { 1.0 };
+                let box_alpha = (if !cfg.enabled { 0.45 } else { 1.0 }) * extra_fade;
                 let eff_exp = exp_alpha * box_alpha;
                 let eff_u8 = (255.0 * eff_exp) as u8;
                 let col_bp = [col_p[0], col_p[1], col_p[2], eff_u8];
@@ -2232,15 +2279,20 @@ impl ClockWidget {
         let eff_style = self.effective_style_mode();
         let t_draw = self.size_spring.value.clamp(0.0, 1.0);
         let slide_y_draw = (1.0 - t_draw) * -20.0;
-        let box_slots: Vec<(f32, f32, bool)> = self
+        let box_slots: Vec<(usize, f32, f32, bool)> = self
             .visible_boxes()
             .into_iter()
             .enumerate()
             .map(|(slot, (_, cfg))| {
                 let (tcx, tcy) = self.box_center(slot, slide_y_draw);
-                (tcx, tcy, cfg.kind == ClockBoxKind::Battery)
+                (slot, tcx, tcy, cfg.kind == ClockBoxKind::Battery)
             })
             .collect();
+        let more_m_draw = if self.customizing {
+            1.0
+        } else {
+            self.more_spring.value.clamp(0.0, 1.0)
+        };
         let bat_pct = self.sys_stats.bat_pct as f32;
         let bar_y_draw = self.footer_bar_y(slide_y_draw);
         let show_more_pill = !self.customizing && self.enabled_box_count() > 4;
@@ -2286,12 +2338,17 @@ impl ClockWidget {
 
                 let mut v: Vec<GlassSurface> = box_slots
                     .iter()
-                    .map(|&(tcx, tcy, is_bat)| {
+                    .filter_map(|&(slot, tcx, tcy, is_bat)| {
+                        let extra_m = if slot >= 4 { more_m_draw } else { 1.0 };
+                        if extra_m <= 0.02 {
+                            return None;
+                        }
                         let cur_cx = cx + (tcx - cx) * t;
                         let init_cy = card_top + COMPACT_H * 0.5;
                         let cur_cy = init_cy + (tcy - init_cy) * t;
-                        let cur_w = (COMPACT_W * 0.45) * (1.0 - t) + tile_w * t;
-                        let cur_h = 28.0 * (1.0 - t) + tile_h * t;
+                        let scale_m = 0.85 + 0.15 * extra_m;
+                        let cur_w = ((COMPACT_W * 0.45) * (1.0 - t) + tile_w * t) * scale_m;
+                        let cur_h = (28.0 * (1.0 - t) + tile_h * t) * scale_m;
                         let cur_r = 14.0 * (1.0 - t) + tile_r * t;
 
                         let tx_norm = (cur_cx - cur_w * 0.5) / sw;
@@ -2299,23 +2356,25 @@ impl ClockWidget {
                         let tw_norm = cur_w / sw;
                         let th_norm = cur_h / sh;
 
-                        GlassSurface::new()
-                            .material(Material::LiquidGlass)
-                            .shape(Shape::RoundedRectangle { radius: cur_r })
-                            .bounds(tx_norm, ty_norm, tw_norm, th_norm)
-                            .curvature(16.0)
-                            .bevel(14.0)
-                            .refraction(16.0)
-                            .dispersion(0.12)
-                            .blur(self.blur_radius)
-                            .specular(1.20)
-                            .fresnel(0.65)
-                            .style_mode(eff_style)
-                            .tint(0.0, 0.0, 1.0, is_light_f32)
-                            .roughness(if is_bat { bat_pct } else { 0.0 })
-                            .element_type(27.0)
-                            .deformation(0.0)
-                            .pointer_pos(px, py)
+                        Some(
+                            GlassSurface::new()
+                                .material(Material::LiquidGlass)
+                                .shape(Shape::RoundedRectangle { radius: cur_r })
+                                .bounds(tx_norm, ty_norm, tw_norm, th_norm)
+                                .curvature(16.0)
+                                .bevel(14.0)
+                                .refraction(16.0)
+                                .dispersion(0.12)
+                                .blur(self.blur_radius)
+                                .specular(1.20)
+                                .fresnel(0.65)
+                                .style_mode(eff_style)
+                                .tint(0.0, 0.0, extra_m, is_light_f32)
+                                .roughness(if is_bat { bat_pct } else { 0.0 })
+                                .element_type(27.0)
+                                .deformation(0.0)
+                                .pointer_pos(px, py),
+                        )
                     })
                     .collect();
 
