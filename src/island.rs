@@ -24,7 +24,7 @@ use wayland_client::{Dispatch, Proxy, QueueHandle};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 
 const FIFO_PATH: &str = "/tmp/liquid_island.fifo";
-pub const COMPACT_PILL_W: f32 = 238.0;
+pub const COMPACT_PILL_W: f32 = 164.0;
 
 struct WindowCache {
     last_check: Instant,
@@ -2871,93 +2871,73 @@ impl IslandWidget {
                         );
                     }
                 } else {
-                    // ── Sleek Dynamic Island Idle Pill (Time • Status • Workspace) ──
-                    let now = chrono::Local::now();
-                    use chrono::Timelike;
-                    let (_is_pm, hour) = now.hour12();
-                    let min = now.minute();
-                    let ampm = if now.hour() >= 12 { "PM" } else { "AM" };
-                    let time_main = format!("{}:{:02}", hour, min);
-
-                    let sz_time = 13.5f32;
-                    let sz_ampm = 9.0f32;
-                    let sz_ws = 11.5f32;
-
-                    let col_secondary = if is_light {
-                        [8, 12, 20, 165]
+                    // ── Sleek Compact Dynamic Island (164px: Media Icon • Workspace Dots • Bell) ──
+                    let col_dim_icon = if is_light {
+                        [8, 12, 20, 150]
                     } else {
-                        [245, 247, 250, 165]
+                        [245, 247, 250, 150]
                     };
-                    let no_shadow = [0u8, 0, 0, 0];
 
-                    // Left: crisp Time (AM/PM dimmed)
-                    let pill_left = island_cx - island_w * 0.5 + 20.0;
-                    let w_main = self
-                        .font
-                        .measure_text(&time_main, sz_time, FontWeight::Bold);
-                    self.font.draw_text_centered_y(
+                    // Left: Hairline music note icon (ready for playback)
+                    let left_icon_x = island_cx - island_w * 0.5 + 22.0;
+                    UIFont::draw_music_icon(
                         buf,
                         self.width,
                         self.height,
-                        &time_main,
-                        pill_left,
+                        left_icon_x,
                         island_cy,
-                        sz_time,
-                        col_ink,
-                        no_shadow,
-                        FontWeight::Bold,
-                    );
-                    self.font.draw_text_centered_y(
-                        buf,
-                        self.width,
-                        self.height,
-                        ampm,
-                        pill_left + w_main + 3.5,
-                        island_cy + 0.5,
-                        sz_ampm,
-                        col_secondary,
-                        no_shadow,
-                        FontWeight::SemiBold,
+                        col_dim_icon,
                     );
 
-                    // Center: subtle online/charging dot
-                    let dot_col = if self.sys_stats.bat_charging {
-                        [52, 199, 89, 220]
-                    } else if !self.sys_stats.is_online {
-                        [255, 149, 10, 200]
-                    } else if is_light {
-                        [0, 0, 0, 45]
-                    } else {
-                        [255, 255, 255, 55]
-                    };
-                    UIFont::draw_rounded_rect_fill(
-                        buf,
-                        self.width,
-                        self.height,
-                        island_cx + 14.0,
-                        island_cy,
-                        2.0,
-                        2.0,
-                        2.0,
-                        dot_col,
-                    );
+                    // Center: Minimal Workspace Pill Dots (1..=5, active elongated into 10px pill)
+                    let ws_id = Self::query_active_workspace().clamp(1, 5) as usize;
+                    let total_dots = 5usize;
+                    let step = 11.0f32;
+                    let start_x = island_cx - ((total_dots - 1) as f32 * step) * 0.5;
+                    for i in 1..=total_dots {
+                        let dx = start_x + ((i - 1) as f32) * step;
+                        if i == ws_id {
+                            UIFont::draw_rounded_rect_fill(
+                                buf,
+                                self.width,
+                                self.height,
+                                dx,
+                                island_cy,
+                                5.5,
+                                2.2,
+                                2.2,
+                                col_ink,
+                            );
+                        } else {
+                            let dot_c = if is_light {
+                                [8, 12, 20, 65]
+                            } else {
+                                [245, 247, 250, 65]
+                            };
+                            UIFont::draw_rounded_rect_fill(
+                                buf,
+                                self.width,
+                                self.height,
+                                dx,
+                                island_cy,
+                                1.8,
+                                1.8,
+                                1.8,
+                                dot_c,
+                            );
+                        }
+                    }
 
-                    // Right: active Hyprland workspace ("WS 1")
-                    let ws_id = Self::query_active_workspace();
-                    let ws_str = format!("WS {}", ws_id);
-                    let w_ws = self.font.measure_text(&ws_str, sz_ws, FontWeight::SemiBold);
-                    let pill_right = island_cx + island_w * 0.5 - 20.0;
-                    self.font.draw_text_centered_y(
+                    // Right: Hairline notification bell icon
+                    let right_icon_x = island_cx + island_w * 0.5 - 22.0;
+                    UIFont::draw_bell_icon(
                         buf,
                         self.width,
                         self.height,
-                        &ws_str,
-                        pill_right - w_ws,
+                        right_icon_x,
                         island_cy,
-                        sz_ws,
-                        col_secondary,
-                        no_shadow,
-                        FontWeight::SemiBold,
+                        6.5,
+                        col_dim_icon,
                     );
                 }
             }
