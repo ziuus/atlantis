@@ -437,6 +437,7 @@ impl ClockWidget {
         }
     }
 
+    #[allow(dead_code)]
     pub fn toggle_expand(&mut self) {
         if self.is_compact {
             self.expand();

@@ -678,6 +678,11 @@ impl CenterHeroClock {
 
     pub fn draw(&mut self) -> bool {
         if !self.enabled {
+            if let Some(renderer) = &mut self.renderer {
+                self.overlay_buffer.fill(0);
+                renderer.update_overlay(self.width, self.height, &self.overlay_buffer);
+                let _ = renderer.render(&[]);
+            }
             return false;
         }
 

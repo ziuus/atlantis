@@ -883,7 +883,8 @@ fn main() {
             app.todo.draw();
         }
         if toggle_clock {
-            app.clock.toggle_expand();
+            app.clock.enabled = !app.clock.enabled;
+            app.clock.needs_input_region_update = true;
             app.clock.draw();
         }
         if toggle_dock {
