@@ -27,7 +27,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrL
 pub const CARD_PAD: f32 = 24.0;
 pub const CARD_W: f32 = 340.0;
 pub const CARD_H: f32 = 286.0;
-pub const COMPACT_W: f32 = 168.0;
+pub const COMPACT_W: f32 = 196.0;
 pub const COMPACT_H: f32 = 32.0;
 
 pub struct WaylandWindow {
@@ -800,22 +800,20 @@ impl ClockWidget {
             let card_top = self.dock_mode.dock_y();
             let pill_cy = card_top + COMPACT_H * 0.5;
 
-            let now = Local::now();
-
             // ── Symmetrical 3-column layout across 168px capsule ──
             // Center of surface is cx. Capsule spans cx - 84.0 to cx + 84.0.
-            // Col 0 center: cx - 52.0
-            // Divider 1: cx - 26.0
+            // Col 0 center: cx - 62.0
+            // Divider 1: cx - 31.0
             // Col 1 center: cx
-            // Divider 2: cx + 26.0
-            // Col 2 center: cx + 52.0
+            // Divider 2: cx + 31.0
+            // Col 2 center: cx + 62.0
 
             // Divider 1: subtle micro separator dot
             UIFont::draw_rounded_rect_fill(
                 buf,
                 self.width,
                 self.height,
-                cx - 26.0,
+                cx - 31.0,
                 pill_cy,
                 1.0,
                 1.0,
@@ -828,7 +826,7 @@ impl ClockWidget {
                 buf,
                 self.width,
                 self.height,
-                cx + 26.0,
+                cx + 31.0,
                 pill_cy,
                 1.0,
                 1.0,
@@ -836,24 +834,35 @@ impl ClockWidget {
                 div_ink,
             );
 
-            // ── Col 0: Time (HH:MM) ──
-            let time_str = now.format("%H:%M").to_string();
-            let time_size = 11.0f32;
-            let time_w = self
+            // ── Col 0: RAM (Micro Icon + GB) ──
+            let ram_str = format!("{:.1}G", self.sys_stats.ram_used_gb);
+            let ram_size = 10.5f32;
+            let ram_w = self
                 .font
-                .measure_text(&time_str, time_size, FontWeight::Bold);
-            let time_x = (cx - 52.0) - time_w * 0.5;
+                .measure_text(&ram_str, ram_size, FontWeight::SemiBold);
+            let r_icon_w = 11.0f32;
+            let r_gap = 4.0f32;
+            let col0_w = r_icon_w + r_gap + ram_w;
+            let col0_start = (cx - 62.0) - col0_w * 0.5;
+            UIFont::draw_ram_icon(
+                buf,
+                self.width,
+                self.height,
+                col0_start + r_icon_w * 0.5,
+                pill_cy,
+                sub_ink,
+            );
             self.font.draw_text_centered_y(
                 buf,
                 self.width,
                 self.height,
-                &time_str,
-                time_x,
+                &ram_str,
+                col0_start + r_icon_w + r_gap,
                 pill_cy,
-                time_size,
+                ram_size,
                 ink_col,
                 col_shadow,
-                FontWeight::Bold,
+                FontWeight::SemiBold,
             );
 
             // ── Col 1: CPU % (Micro Icon + Value on same baseline) ──
@@ -892,7 +901,7 @@ impl ClockWidget {
                 .measure_text(&bat_str, bat_size, FontWeight::SemiBold);
             let bat_icon_w = 13.0f32;
             let col2_w = bat_icon_w + gap + bat_w;
-            let col2_start_x = (cx + 52.0) - col2_w * 0.5;
+            let col2_start_x = (cx + 62.0) - col2_w * 0.5;
             let bat_icon_cx = col2_start_x + bat_icon_w * 0.5;
             let bat_text_x = col2_start_x + bat_icon_w + gap;
 

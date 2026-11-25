@@ -2890,44 +2890,48 @@ impl IslandWidget {
                         dot_col,
                     );
 
-                    // Right-aligned battery % + crisp capsule icon anchored at right (-20px)
-                    let bat_pct = self.sys_stats.bat_pct;
-                    let bat_pct_str = format!("{}%", bat_pct);
-                    let w_bat_txt =
-                        self.font
-                            .measure_text(&bat_pct_str, sz_bat, FontWeight::SemiBold);
-                    let pill_right = island_cx + island_w * 0.5 - 20.0;
-                    let bat_icon_cx = pill_right - 9.0;
-                    let bat_txt_x = bat_icon_cx - 12.0 - w_bat_txt;
-
-                    // Keep text crisp white (or amber if critically low) — never muddy green!
-                    let bat_txt_col = if bat_pct < 20 && !self.sys_stats.bat_charging {
-                        [255, 149, 10, 255]
+                    // Right-aligned Volume % + crisp hairline speaker icon (no duplicate battery!)
+                    let vol_pct = self.sys_stats.vol_pct;
+                    let vol_str = if self.sys_stats.vol_muted {
+                        "Mute".to_string()
                     } else {
-                        col_ink
+                        format!("{}%", vol_pct)
                     };
+                    let w_vol_txt = self
+                        .font
+                        .measure_text(&vol_str, sz_bat, FontWeight::SemiBold);
+                    let pill_right = island_cx + island_w * 0.5 - 20.0;
+                    let vol_icon_cx = pill_right - 8.0;
+                    let vol_txt_x = vol_icon_cx - 12.0 - w_vol_txt;
 
                     self.font.draw_text_centered_y(
                         buf,
                         self.width,
                         self.height,
-                        &bat_pct_str,
-                        bat_txt_x,
+                        &vol_str,
+                        vol_txt_x,
                         island_cy,
                         sz_bat,
-                        bat_txt_col,
+                        if self.sys_stats.vol_muted {
+                            col_secondary
+                        } else {
+                            col_ink
+                        },
                         no_shadow,
                         FontWeight::SemiBold,
                     );
-                    UIFont::draw_battery_icon(
+                    Self::draw_speaker_icon(
                         buf,
                         self.width,
                         self.height,
-                        bat_icon_cx,
+                        vol_icon_cx,
                         island_cy,
-                        bat_pct,
-                        self.sys_stats.bat_charging,
-                        col_ink,
+                        if self.sys_stats.vol_muted {
+                            col_secondary
+                        } else {
+                            col_ink
+                        },
+                        !self.sys_stats.vol_muted && vol_pct > 0,
                     );
                 }
             }
