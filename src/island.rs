@@ -442,6 +442,8 @@ pub enum IslandIpcEvent {
     BrightnessDown,
     BrightnessSet(u32),
     SwitchAudioSink,
+    ToggleAutoHide,
+    SetAutoHide(bool),
     Toast {
         app: String,
         title: String,
@@ -1762,6 +1764,18 @@ impl IslandWidget {
                     self.save_config();
                 }
                 IslandIpcEvent::ReloadConfig => self.reload_config(),
+                IslandIpcEvent::ToggleAutoHide => {
+                    self.auto_hide = !self.auto_hide;
+                    if !self.auto_hide && self.mode == IslandMode::Hidden {
+                        self.set_mode(IslandMode::CompactPill);
+                    }
+                }
+                IslandIpcEvent::SetAutoHide(val) => {
+                    self.auto_hide = val;
+                    if !self.auto_hide && self.mode == IslandMode::Hidden {
+                        self.set_mode(IslandMode::CompactPill);
+                    }
+                }
                 IslandIpcEvent::VolumeUp => {
                     let _ = Command::new("wpctl")
                         .args(["set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", "5%+"])
@@ -2020,10 +2034,10 @@ impl IslandWidget {
             }
         }
 
-        // When expanded, retract back after generous 8s timeout of no user interaction
-        let retract_timeout = Duration::from_millis(8000);
+        // When expanded, retract back after 3.0s timeout of no user interaction
+        let retract_timeout = Duration::from_millis(3000);
 
-        if !self.is_hovered
+        let expanded_idle = !self.is_hovered
             && !self.is_pressed
             && self.hud.is_none()
             && matches!(
@@ -2032,9 +2046,9 @@ impl IslandWidget {
                     | IslandMode::QuickAccess
                     | IslandMode::SystemOverview
                     | IslandMode::PowerMenu
-            )
-            && self.last_interaction.elapsed() >= retract_timeout
-        {
+            );
+
+        if expanded_idle && self.last_interaction.elapsed() >= retract_timeout {
             self.set_mode(IslandMode::CompactPill);
         }
 
@@ -2062,7 +2076,8 @@ impl IslandWidget {
             || self.mode == IslandMode::Notification
             || (self.hover_dwell_start.is_some() && self.mode == IslandMode::CompactPill)
             || self.hud.is_some()
-            || hold_active;
+            || hold_active
+            || expanded_idle;
         self.animating = is_active;
         is_active
     }
@@ -4171,6 +4186,24 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
                             || trimmed == "hover_to_expand 0"
                         {
                             send_evt(IslandIpcEvent::SetHoverExpand(false));
+                        } else if trimmed == "autohide"
+                            || trimmed == "toggle_autohide"
+                            || trimmed == "auto_hide"
+                            || trimmed == "toggle_auto_hide"
+                        {
+                            send_evt(IslandIpcEvent::ToggleAutoHide);
+                        } else if trimmed == "autohide:true"
+                            || trimmed == "autohide 1"
+                            || trimmed == "auto_hide:true"
+                            || trimmed == "autohide on"
+                        {
+                            send_evt(IslandIpcEvent::SetAutoHide(true));
+                        } else if trimmed == "autohide:false"
+                            || trimmed == "autohide 0"
+                            || trimmed == "auto_hide:false"
+                            || trimmed == "autohide off"
+                        {
+                            send_evt(IslandIpcEvent::SetAutoHide(false));
                         } else if trimmed == "vol_up"
                             || trimmed == "volume_up"
                             || trimmed == "vol+"

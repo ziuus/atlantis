@@ -18,6 +18,7 @@ Navigation & Modes:
   toggle              Toggle island visibility
   hide                Hide island
   show / compact      Show compact capsule
+  autohide [on|off]   Toggle/set auto-hiding when windows overlap
   next / prev         Cycle between expanded carousel modes
   music               Expand music player
   apps / quick        Expand quick access launcher
