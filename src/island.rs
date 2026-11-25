@@ -2051,9 +2051,25 @@ impl IslandWidget {
 
     fn toggle(&mut self) {
         match self.mode {
-            IslandMode::Hidden => self.set_mode(IslandMode::CompactPill),
-            IslandMode::CompactPill => self.set_mode(self.default_expanded_mode()),
-            _ => self.set_mode(IslandMode::CompactPill),
+            IslandMode::Hidden | IslandMode::CompactPill => {
+                self.set_mode(self.default_expanded_mode());
+                self.last_interaction = Instant::now();
+                if let Some(ls) = &self.layer_surface {
+                    ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+                }
+                self.needs_input_region_update = true;
+            }
+            _ => {
+                if self.is_window_overlapping {
+                    self.set_mode(IslandMode::Hidden);
+                } else {
+                    self.set_mode(IslandMode::CompactPill);
+                }
+                if let Some(ls) = &self.layer_surface {
+                    ls.set_keyboard_interactivity(KeyboardInteractivity::None);
+                }
+                self.needs_input_region_update = true;
+            }
         }
     }
 
