@@ -2948,6 +2948,8 @@ impl IslandWidget {
                         }
                     }
                 }
+            } else {
+                rects = crate::compositor::active_window_rects();
             }
 
             *lock = Some(WindowCache {

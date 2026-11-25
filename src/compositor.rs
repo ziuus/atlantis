@@ -178,6 +178,89 @@ pub fn lock_screen() {
     let _ = Command::new("sh").args(["-c", script]).spawn();
 }
 
+/// Returns `(x1, y1, x2, y2)` rects for visible windows on the active workspace (Sway / Niri).
+pub fn active_window_rects() -> Vec<(i32, i32, i32, i32)> {
+    let mut rects = Vec::new();
+    match detect() {
+        CompositorBackend::Sway => {
+            if let Ok(out) = Command::new("swaymsg").args(["-t", "get_tree"]).output() {
+                if out.status.success() {
+                    if let Ok(tree) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+                        collect_sway_rects(&tree, false, &mut rects);
+                    }
+                }
+            }
+        }
+        CompositorBackend::Niri => {
+            if let Ok(out) = Command::new("niri").args(["msg", "-j", "windows"]).output() {
+                if out.status.success() {
+                    if let Ok(serde_json::Value::Array(list)) = serde_json::from_slice(&out.stdout)
+                    {
+                        let active_ws = list
+                            .iter()
+                            .find(|w| w.get("is_focused").and_then(|v| v.as_bool()).unwrap_or(false))
+                            .and_then(|w| w.get("workspace_id").and_then(|v| v.as_i64()));
+                        if active_ws.is_some() {
+                            rects.push((0, 0, 1920, 1080));
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    rects
+}
+
+fn collect_sway_rects(
+    node: &serde_json::Value,
+    in_focused_ws: bool,
+    rects: &mut Vec<(i32, i32, i32, i32)>,
+) {
+    let is_ws = node.get("type").and_then(|v| v.as_str()) == Some("workspace");
+    let now_focused_ws = if is_ws {
+        has_focused_descendant(node)
+    } else {
+        in_focused_ws
+    };
+    if now_focused_ws && (node.get("app_id").is_some() || node.get("window_properties").is_some()) {
+        if let Some(r) = node.get("rect") {
+            let x = r.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y = r.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let w = r.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let h = r.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            if w > 0 && h > 0 {
+                rects.push((x, y, x + w, y + h));
+            }
+        }
+    }
+    for key in ["nodes", "floating_nodes"] {
+        if let Some(serde_json::Value::Array(children)) = node.get(key) {
+            for ch in children {
+                collect_sway_rects(ch, now_focused_ws, rects);
+            }
+        }
+    }
+}
+
+fn has_focused_descendant(node: &serde_json::Value) -> bool {
+    if node
+        .get("focused")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    for key in ["nodes", "floating_nodes"] {
+        if let Some(serde_json::Value::Array(children)) = node.get(key) {
+            if children.iter().any(has_focused_descendant) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Take a screenshot using `grim` (wlroots), `spectacle` (KDE), or `gnome-screenshot`.
 pub fn take_screenshot() {
     let script = "mkdir -p ~/Pictures && OUT=~/Pictures/shot_$(date +%s).png; \
