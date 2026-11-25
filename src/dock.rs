@@ -232,6 +232,22 @@ impl DockWidget {
         }
     }
 
+    pub fn dismiss_with_escape(&mut self) -> bool {
+        if !self.is_hovered && self.is_compact {
+            return false;
+        }
+        self.is_hovered = false;
+        if !self.is_compact {
+            self.collapse();
+        }
+        if let Some(ls) = &self.layer_surface {
+            ls.set_keyboard_interactivity(KeyboardInteractivity::None);
+        }
+        self.needs_input_region_update = true;
+        self.needs_redraw = true;
+        true
+    }
+
     pub fn effective_is_light(&self) -> bool {
         match self.theme_mode {
             1 => false,                   // Forced Dark
@@ -732,6 +748,13 @@ impl DockWidget {
                 self.needs_input_region_update = true;
                 let inside = self.is_inside(px, py);
                 self.is_hovered = inside;
+                if let Some(ls) = &self.layer_surface {
+                    ls.set_keyboard_interactivity(if inside {
+                        KeyboardInteractivity::Exclusive
+                    } else {
+                        KeyboardInteractivity::None
+                    });
+                }
                 if inside {
                     self.last_hover_time = Instant::now();
                     if self.is_compact && self.hover_to_expand {
@@ -747,6 +770,9 @@ impl DockWidget {
                 self.pressed_item = None;
                 self.needs_redraw = true;
                 self.needs_input_region_update = true;
+                if let Some(ls) = &self.layer_surface {
+                    ls.set_keyboard_interactivity(KeyboardInteractivity::None);
+                }
                 true
             }
             PointerEventKind::Motion { .. } => {

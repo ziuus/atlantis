@@ -678,6 +678,29 @@ impl IslandWidget {
         }
     }
 
+    pub fn dismiss_with_escape(&mut self) -> bool {
+        if !self.is_hovered
+            && (self.mode == IslandMode::CompactPill || self.mode == IslandMode::Hidden)
+        {
+            return false;
+        }
+        self.is_hovered = false;
+        self.hover_dwell_start = None;
+        self.hot_edge_dwell_start = None;
+        self.hud = None;
+        if self.is_window_overlapping {
+            self.set_mode(IslandMode::Hidden);
+        } else {
+            self.set_mode(IslandMode::CompactPill);
+        }
+        if let Some(ls) = &self.layer_surface {
+            ls.set_keyboard_interactivity(KeyboardInteractivity::None);
+        }
+        self.needs_input_region_update = true;
+        self.needs_redraw = true;
+        true
+    }
+
     pub fn current_fillet_radius(&self) -> f32 {
         let h_span = (Tokens::ISLAND_EXPANDED_H - Tokens::ISLAND_COMPACT_H).max(1.0);
         let h_t = ((self.current_h - Tokens::ISLAND_COMPACT_H) / h_span).clamp(0.0, 1.0);
@@ -1345,11 +1368,19 @@ impl IslandWidget {
                     self.set_mode(IslandMode::CompactPill);
                     self.is_hovered = true;
                     self.last_interaction = Instant::now();
+                    if let Some(ls) = &self.layer_surface {
+                        ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+                    }
+                    self.needs_input_region_update = true;
                     return true;
                 }
                 if self.is_inside_island(lx, ly) {
                     self.is_hovered = true;
                     self.last_interaction = Instant::now();
+                    if let Some(ls) = &self.layer_surface {
+                        ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+                    }
+                    self.needs_input_region_update = true;
                     if self.hover_to_expand
                         && self.mode == IslandMode::CompactPill
                         && self.hud.is_none()
@@ -1359,6 +1390,10 @@ impl IslandWidget {
                 } else {
                     self.is_hovered = false;
                     self.hover_dwell_start = None;
+                    if let Some(ls) = &self.layer_surface {
+                        ls.set_keyboard_interactivity(KeyboardInteractivity::None);
+                    }
+                    self.needs_input_region_update = true;
                 }
                 true
             }
@@ -1370,6 +1405,10 @@ impl IslandWidget {
                 self.hover_dwell_start = None;
                 self.cursor_pos = [-1.0, -1.0];
                 self.last_interaction = Instant::now();
+                if let Some(ls) = &self.layer_surface {
+                    ls.set_keyboard_interactivity(KeyboardInteractivity::None);
+                }
+                self.needs_input_region_update = true;
                 true
             }
             PointerEventKind::Motion { .. } => {

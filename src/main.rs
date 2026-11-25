@@ -300,6 +300,23 @@ impl KeyboardHandler for ShellApp {
             self.launcher.needs_redraw = false;
             return;
         }
+        if event.keysym == smithay_client_toolkit::seat::keyboard::Keysym::Escape {
+            if self.island.dismiss_with_escape() {
+                self.island.draw();
+                self.island.needs_redraw = false;
+                return;
+            }
+            if self.clock.dismiss_with_escape() {
+                self.clock.draw();
+                self.clock.needs_redraw = false;
+                return;
+            }
+            if self.dock.dismiss_with_escape() {
+                self.dock.draw();
+                self.dock.needs_redraw = false;
+                return;
+            }
+        }
         if self.todo.on_keyboard_event(&event) {
             self.todo.draw();
             self.todo.needs_redraw = false;
