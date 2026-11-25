@@ -2819,18 +2819,9 @@ impl IslandWidget {
                         );
                     }
                 } else {
-                    // ── Sleek Dynamic Island Idle Pill (edge-balanced 238px capsule) ──
-                    let now = chrono::Local::now();
-                    use chrono::Timelike;
-                    let (_is_pm, hour) = now.hour12();
-                    let min = now.minute();
-                    let ampm = if now.hour() >= 12 { "PM" } else { "AM" };
-                    let time_main = format!("{}:{:02}", hour, min);
-
-                    let sz_time = 13.5f32;
-                    let sz_ampm = 9.0f32;
+                    // ── Sleek Dynamic Island Idle Pill (Brightness • Status • Volume) ──
+                    // Zero duplication: Time/Date = Center Clock, RAM/CPU/Bat = Top-Left, Tasks = Top-Right
                     let sz_bat = 12.0f32;
-
                     let col_secondary = if is_light {
                         [8, 12, 20, 165]
                     } else {
@@ -2838,32 +2829,26 @@ impl IslandWidget {
                     };
                     let no_shadow = [0u8, 0, 0, 0];
 
-                    // Left-aligned time anchored cleanly inside left capsule curve (+20px)
-                    let pill_left = island_cx - island_w * 0.5 + 20.0;
-                    let w_main = self
-                        .font
-                        .measure_text(&time_main, sz_time, FontWeight::Bold);
-                    self.font.draw_text_centered_y(
+                    let pill_left = island_cx - island_w * 0.5 + 22.0;
+                    let bri_icon_cx = pill_left + 7.0;
+                    Self::draw_brightness_icon(
                         buf,
                         self.width,
                         self.height,
-                        &time_main,
-                        pill_left,
+                        bri_icon_cx,
                         island_cy,
-                        sz_time,
                         col_ink,
-                        no_shadow,
-                        FontWeight::Bold,
                     );
+                    let bri_str = format!("{}%", self.sys_stats.brightness_pct);
                     self.font.draw_text_centered_y(
                         buf,
                         self.width,
                         self.height,
-                        ampm,
-                        pill_left + w_main + 3.5,
-                        island_cy + 0.5,
-                        sz_ampm,
-                        col_secondary,
+                        &bri_str,
+                        bri_icon_cx + 14.0,
+                        island_cy,
+                        sz_bat,
+                        col_ink,
                         no_shadow,
                         FontWeight::SemiBold,
                     );
@@ -2882,7 +2867,7 @@ impl IslandWidget {
                         buf,
                         self.width,
                         self.height,
-                        island_cx + 12.0,
+                        island_cx,
                         island_cy,
                         2.0,
                         2.0,
