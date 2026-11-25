@@ -2628,79 +2628,177 @@ impl IslandWidget {
                         );
                     }
                 } else {
-                    // ── Clean, Luxurious Idle Dynamic Island (Apple & Tide-Island Inspired) ──
-                    // Left: Clean Clock Time (e.g. "10:05 AM" in Plus Jakarta Sans)
-                    let left_x = island_cx - island_w * 0.5 + 24.0;
+                    // ── Apple Dynamic Island — Premium Minimal Idle Pill ──
+                    // Layout: [ clock ] | [ bat_icon  bat% ]
+                    // All text properly vertically centered via draw_text_centered_y
+
                     let now = chrono::Local::now();
-                    let time_str = now.format("%I:%M %p").to_string();
-                    self.font.draw_text(
+                    use chrono::Timelike;
+                    let (hour, _is_pm) = now.hour12();
+                    let min = now.minute();
+                    let ampm = if now.hour() >= 12 { "PM" } else { "AM" };
+                    let hour_str = format!("{}", hour);
+                    let min_str = format!("{:02}", min);
+                    let colon_str = ":";
+
+                    // Size config
+                    let sz_time = 14.0f32; // big time digits
+                    let sz_ampm = 9.5f32; // small AM/PM label
+                    let sz_bat = 12.5f32; // battery percentage
+
+                    // Measure widths for precise layout
+                    let w_hour = self.font.measure_text(&hour_str, sz_time, FontWeight::Bold);
+                    let w_colon = self.font.measure_text(colon_str, sz_time, FontWeight::Bold);
+                    let w_min = self.font.measure_text(&min_str, sz_time, FontWeight::Bold);
+                    let w_ampm = self.font.measure_text(ampm, sz_ampm, FontWeight::SemiBold);
+                    let bat_pct = self.sys_stats.bat_pct;
+                    let bat_pct_str = format!("{}%", bat_pct);
+                    let w_bat_txt =
+                        self.font
+                            .measure_text(&bat_pct_str, sz_bat, FontWeight::SemiBold);
+                    let w_bat_icon = 20.0f32; // battery icon width
+                    let gap_bat = 4.0f32; // gap between icon and text
+
+                    // Total widths of left and right groups
+                    let time_total_w = w_hour + w_colon + w_min + 4.0 + w_ampm; // 4px gap before AM/PM
+                    let bat_total_w = w_bat_icon + gap_bat + w_bat_txt;
+
+                    // Divider x = center of pill
+                    let divider_x = island_cx;
+                    let padding = 16.0f32;
+
+                    // --- LEFT: Clock, right-aligned to divider ---
+                    let time_right = divider_x - padding;
+                    let time_left = time_right - time_total_w;
+
+                    // Colors
+                    let col_primary = col_ink;
+                    let col_secondary = if is_light {
+                        [8, 12, 20, 160]
+                    } else {
+                        [245, 247, 250, 160]
+                    };
+                    let no_shadow = [0u8, 0, 0, 0];
+
+                    // Hour
+                    let mut px = time_left;
+                    self.font.draw_text_centered_y(
                         buf,
                         self.width,
                         self.height,
-                        &time_str,
-                        left_x,
-                        island_cy - 6.0,
-                        Tokens::TYPE_BODY_SM,
-                        col_ink,
+                        &hour_str,
+                        px,
+                        island_cy,
+                        sz_time,
+                        col_primary,
+                        no_shadow,
                         FontWeight::Bold,
                     );
+                    px += w_hour;
 
-                    // Center: Subtle pulse dot (Apple Emerald when charging, subtle accent otherwise)
-                    let dot_col = if self.sys_stats.bat_charging {
-                        [52, 199, 89, 220] // Apple Emerald
-                    } else if is_light {
-                        [100, 115, 130, 90]
+                    // Colon (slightly dimmed, optically centered)
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        colon_str,
+                        px,
+                        island_cy - 0.5,
+                        sz_time,
+                        col_secondary,
+                        no_shadow,
+                        FontWeight::Bold,
+                    );
+                    px += w_colon;
+
+                    // Minutes
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        &min_str,
+                        px,
+                        island_cy,
+                        sz_time,
+                        col_primary,
+                        no_shadow,
+                        FontWeight::Bold,
+                    );
+                    px += w_min + 4.0;
+
+                    // AM/PM — small, dimmed, vertically shifted up slightly
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        ampm,
+                        px,
+                        island_cy - 3.5,
+                        sz_ampm,
+                        col_secondary,
+                        no_shadow,
+                        FontWeight::SemiBold,
+                    );
+
+                    // --- THIN DIVIDER LINE at center ---
+                    let div_col = if is_light {
+                        [0u8, 0, 0, 40]
                     } else {
-                        [180, 195, 215, 90]
+                        [255u8, 255, 255, 30]
                     };
                     UIFont::draw_rounded_rect_fill(
                         buf,
                         self.width,
                         self.height,
-                        island_cx + 12.0,
+                        divider_x,
                         island_cy,
-                        2.2,
-                        2.2,
-                        2.2,
-                        dot_col,
+                        0.5,
+                        7.0,
+                        0.5,
+                        div_col,
                     );
 
-                    // Right: Crisp, legible Battery Percentage & Lucide Icon
-                    let bat_pct = self.sys_stats.bat_pct;
-                    let bat_pct_str = format!("{}%", bat_pct);
-                    let bat_icon_x = island_cx + island_w * 0.5 - 24.0;
-                    let bat_text_x = bat_icon_x - 36.0;
-
+                    // --- RIGHT: Battery, left-aligned from divider ---
+                    let bat_left = divider_x + padding;
                     let bat_text_col = if self.sys_stats.bat_charging {
-                        [52, 199, 89, 255]
+                        [52u8, 199, 89, 255] // Apple Emerald
                     } else if bat_pct < 20 {
-                        [255, 149, 10, 255]
+                        [255u8, 149, 10, 255] // Amber warning
                     } else {
-                        col_ink
+                        col_primary
+                    };
+                    let bat_icon_col = if self.sys_stats.bat_charging {
+                        [52u8, 199, 89, 220]
+                    } else {
+                        col_secondary
                     };
 
-                    self.font.draw_text(
-                        buf,
-                        self.width,
-                        self.height,
-                        &bat_pct_str,
-                        bat_text_x,
-                        island_cy - 6.0,
-                        Tokens::TYPE_BODY_SM,
-                        bat_text_col,
-                        FontWeight::SemiBold,
-                    );
-
+                    // Battery icon (left of text)
                     UIFont::draw_battery_icon(
                         buf,
                         self.width,
                         self.height,
-                        bat_icon_x,
+                        bat_left + w_bat_icon * 0.5,
                         island_cy,
                         bat_pct,
                         self.sys_stats.bat_charging,
-                        col_ink,
+                        bat_icon_col,
                     );
+
+                    // Percentage text
+                    self.font.draw_text_centered_y(
+                        buf,
+                        self.width,
+                        self.height,
+                        &bat_pct_str,
+                        bat_left + w_bat_icon + gap_bat,
+                        island_cy,
+                        sz_bat,
+                        bat_text_col,
+                        no_shadow,
+                        FontWeight::SemiBold,
+                    );
+                    let _ = bat_total_w; // used for layout reference
                 }
             }
             IslandMode::Hidden => {}
