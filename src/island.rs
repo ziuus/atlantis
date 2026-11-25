@@ -1282,7 +1282,10 @@ impl IslandWidget {
                 if self.is_inside_island(lx, ly) {
                     self.is_hovered = true;
                     self.last_interaction = Instant::now();
-                    if self.hover_to_expand && self.mode == IslandMode::CompactPill {
+                    if self.hover_to_expand
+                        && self.mode == IslandMode::CompactPill
+                        && self.hud.is_none()
+                    {
                         self.hover_dwell_start = Some(Instant::now());
                     }
                 } else {
@@ -1318,7 +1321,10 @@ impl IslandWidget {
                 if inside {
                     self.is_hovered = true;
                     self.last_interaction = Instant::now();
-                    if self.hover_to_expand && self.mode == IslandMode::CompactPill {
+                    if self.hover_to_expand
+                        && self.mode == IslandMode::CompactPill
+                        && self.hud.is_none()
+                    {
                         if let Some(start) = self.hover_dwell_start {
                             if start.elapsed() >= Duration::from_millis(70) {
                                 self.set_mode(IslandMode::MusicExpanded);
@@ -1547,6 +1553,7 @@ impl IslandWidget {
         if self.mode == new_mode {
             return;
         }
+        self.hud = None;
         let old_mode = self.mode;
         self.prev_mode = old_mode;
         self.mode = new_mode;
@@ -2956,6 +2963,10 @@ impl IslandWidget {
             }
             IslandMode::Hidden => {}
             _ => {
+                if self.current_h < 68.0 {
+                    self.overlay_buffer = overlay_vec;
+                    return;
+                }
                 if let Some(active_idx) = Self::page_index(self.mode) {
                     Self::draw_page_dots(
                         buf,
