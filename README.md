@@ -8,7 +8,14 @@
 
 [![Wayland](https://img.shields.io/badge/Wayland-Layer--Shell-2B3A42?style=flat-square&logo=linux)](https://wayland.freedesktop.org)
 [![Engine](https://img.shields.io/badge/Engine-Liquid--Glass-blue?style=flat-square)](https://github.com/ziuus/liquid-glass)
+[![CI](https://img.shields.io/github/actions/workflow/status/ziuus/atlantis/ci-release.yml?style=flat-square&label=CI)](https://github.com/ziuus/atlantis/actions)
 [![License](https://img.shields.io/badge/License-MIT-black?style=flat-square)](LICENSE)
+
+<br />
+
+| 2-Card Liquid Glass Launcher | Adaptive Solid Backdrop Above Apps |
+| :---: | :---: |
+| <img src="assets/launcher-glass.png" alt="Atlantis 2-Card Liquid Glass Launcher" width="460" /> | <img src="assets/launcher-solid.png" alt="Atlantis Adaptive Solid Backdrop" width="460" /> |
 
 <br />
 

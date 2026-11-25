@@ -1,0 +1,29 @@
+name: CI & Release
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install Wayland build deps
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev pkg-config
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - name: Package release binary
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cargo build --release
+          tar -czf atlantis-linux-x86_64.tar.gz -C target/release atlantis
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: atlantis-linux-x86_64.tar.gz
