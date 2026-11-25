@@ -101,6 +101,7 @@ pub struct LauncherWidget {
     pub is_window_overlapping: bool,
     pub app_backdrop_solid: bool,
     pub open_spring: Spring,
+    pub panel_spring: Spring,
     pub style_mode: f32,
     pub theme_mode: u32,
     pub blur_radius: f32,
@@ -179,9 +180,19 @@ impl LauncherWidget {
             open_spring: Spring::with_params(
                 0.0,
                 SpringParams {
-                    stiffness: 300.0,
-                    damping: 34.5,
-                    mass: 0.9,
+                    stiffness: 380.0,
+                    damping: 33.0,
+                    mass: 0.75,
+                    initial_velocity: 0.0,
+                    epsilon: 0.002,
+                },
+            ),
+            panel_spring: Spring::with_params(
+                0.0,
+                SpringParams {
+                    stiffness: 240.0,
+                    damping: 30.0,
+                    mass: 1.05,
                     initial_velocity: 0.0,
                     epsilon: 0.002,
                 },
@@ -301,6 +312,7 @@ impl LauncherWidget {
         }
         self.refilter();
         self.open_spring.set_target(1.0);
+        self.panel_spring.set_target(1.0);
         if let Some(ls) = &self.layer_surface {
             ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
         }
@@ -311,6 +323,7 @@ impl LauncherWidget {
     pub fn close(&mut self) {
         self.is_open = false;
         self.open_spring.set_target(0.0);
+        self.panel_spring.set_target(0.0);
         if let Some(ls) = &self.layer_surface {
             ls.set_keyboard_interactivity(KeyboardInteractivity::None);
         }
@@ -337,6 +350,7 @@ impl LauncherWidget {
     pub fn update_physics(&mut self, dt: f32) -> bool {
         let eff_dt = (dt * self.anim_speed).clamp(0.0, 0.05);
         self.open_spring.update(eff_dt);
+        self.panel_spring.update(eff_dt);
         if (self.open_spring.value - self.open_spring.target).abs() < 0.002
             && self.open_spring.velocity.abs() < 0.01
         {
@@ -345,7 +359,15 @@ impl LauncherWidget {
             }
             self.open_spring.snap_to_target();
         }
-        !self.open_spring.is_at_rest()
+        if (self.panel_spring.value - self.panel_spring.target).abs() < 0.002
+            && self.panel_spring.velocity.abs() < 0.01
+        {
+            if !self.panel_spring.is_at_rest() {
+                self.needs_redraw = true;
+            }
+            self.panel_spring.snap_to_target();
+        }
+        !self.open_spring.is_at_rest() || !self.panel_spring.is_at_rest()
     }
 
     fn freq_path() -> String {
@@ -1582,8 +1604,9 @@ impl LauncherWidget {
     }
 
     pub fn draw(&mut self) -> bool {
-        let t = self.open_spring.value.clamp(0.0, 1.0);
-        if !self.is_open && t <= 0.01 {
+        let t_search = self.open_spring.value.clamp(0.0, 1.0);
+        let t_panel = ((self.panel_spring.value - 0.12) / 0.88).clamp(0.0, 1.0);
+        if !self.is_open && t_search <= 0.01 && t_panel <= 0.01 {
             if let Some(r) = &mut self.renderer {
                 self.overlay_buffer.fill(0);
                 r.update_overlay(self.width, self.height, &self.overlay_buffer);
@@ -1598,55 +1621,62 @@ impl LauncherWidget {
         let eff_style = self.effective_style_mode();
         if let Some(r) = &mut self.renderer {
             r.update_overlay(self.width, self.height, &self.overlay_buffer);
-            let motion = (1.0 - t).clamp(0.0, 1.0);
-            let inset_x = motion * 0.06;
-            let y_slide = motion * 0.04;
-            let w_b = (1.0 - inset_x * 2.0).clamp(0.2, 1.0);
-            let x_b = (0.5 - w_b * 0.5).clamp(0.0, 0.8);
-
             let h_total = self.height as f32;
-            let search_h_norm = (SEARCH_CARD_H / h_total) * (1.0 - motion * 0.08);
-            let search_y_norm = (y_slide * 0.6).clamp(0.0, 0.8);
 
-            let main_y_norm = ((MAIN_CARD_Y / h_total) + y_slide).clamp(0.0, 0.85);
-            let main_h_norm =
-                (((h_total - MAIN_CARD_Y) / h_total) * (1.0 - motion * 0.05)).min(1.0 - main_y_norm);
+            // Card 1 (Search Pill): expands horizontally from center & drops in crisply
+            let m_search = (1.0 - t_search).clamp(0.0, 1.0);
+            let w_search = (0.42 + 0.58 * t_search).clamp(0.25, 1.0);
+            let x_search = (0.5 - w_search * 0.5).clamp(0.0, 0.75);
+            let y_search = (m_search * 0.035).clamp(0.0, 0.8);
+            let h_search = ((SEARCH_CARD_H / h_total) * (0.76 + 0.24 * t_search)).clamp(0.04, 1.0);
 
             let search_card = GlassSurface::new()
                 .material(Material::LiquidGlass)
                 .shape(Shape::RoundedRectangle { radius: 20.0 })
-                .bounds(x_b, search_y_norm, w_b.min(1.0 - x_b), search_h_norm)
+                .bounds(x_search, y_search, w_search.min(1.0 - x_search), h_search)
                 .curvature(18.0)
-                .bevel(14.0 + motion * 5.0)
-                .refraction(18.0 + motion * 12.0)
+                .bevel(14.0 + m_search * 6.0)
+                .refraction(18.0 + m_search * 16.0)
                 .dispersion(0.14)
                 .blur(self.blur_radius)
                 .specular(1.25)
                 .fresnel(0.65)
                 .style_mode(eff_style)
-                .tint(0.0, 0.0, t, is_light)
+                .tint(0.0, 0.0, t_search, is_light)
                 .element_type(27.0)
                 .pointer_pos(self.cursor_pos[0], self.cursor_pos[1]);
 
-            let main_card = GlassSurface::new()
-                .material(Material::LiquidGlass)
-                .shape(Shape::RoundedRectangle { radius: 24.0 })
-                .bounds(x_b, main_y_norm, w_b.min(1.0 - x_b), main_h_norm)
-                .curvature(20.0)
-                .bevel(16.0 + motion * 6.0)
-                .refraction(20.0 + motion * 16.0)
-                .dispersion(0.14)
-                .blur(self.blur_radius)
-                .specular(1.25)
-                .fresnel(0.65)
-                .style_mode(eff_style)
-                .tint(0.0, 0.0, t, is_light)
-                .element_type(27.0)
-                .pointer_pos(self.cursor_pos[0], self.cursor_pos[1]);
+            if t_panel > 0.015 {
+                // Card 2 (Split Panel): unfolds downward from beneath Search Pill
+                let m_panel = (1.0 - t_panel).clamp(0.0, 1.0);
+                let w_panel = (0.84 + 0.16 * t_panel).clamp(0.3, 1.0);
+                let x_panel = (0.5 - w_panel * 0.5).clamp(0.0, 0.7);
+                let main_y_norm = ((MAIN_CARD_Y / h_total) - m_panel * 0.045).clamp(0.0, 0.85);
+                let full_main_h = (h_total - MAIN_CARD_Y) / h_total;
+                let main_h_norm = (full_main_h * (0.18 + 0.82 * t_panel)).min(1.0 - main_y_norm);
 
-            let _ = r.render(&[search_card, main_card]);
+                let main_card = GlassSurface::new()
+                    .material(Material::LiquidGlass)
+                    .shape(Shape::RoundedRectangle { radius: 24.0 })
+                    .bounds(x_panel, main_y_norm, w_panel.min(1.0 - x_panel), main_h_norm)
+                    .curvature(20.0)
+                    .bevel(16.0 + m_panel * 8.0)
+                    .refraction(20.0 + m_panel * 18.0)
+                    .dispersion(0.14)
+                    .blur(self.blur_radius)
+                    .specular(1.25)
+                    .fresnel(0.65)
+                    .style_mode(eff_style)
+                    .tint(0.0, 0.0, t_panel, is_light)
+                    .element_type(27.0)
+                    .pointer_pos(self.cursor_pos[0], self.cursor_pos[1]);
+
+                let _ = r.render(&[search_card, main_card]);
+            } else {
+                let _ = r.render(&[search_card]);
+            }
         }
-        !self.open_spring.is_at_rest()
+        !self.open_spring.is_at_rest() || !self.panel_spring.is_at_rest()
     }
 }
 

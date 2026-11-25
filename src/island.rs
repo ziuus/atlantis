@@ -696,6 +696,14 @@ impl IslandWidget {
         let _ = Command::new("wl-copy").arg(msg.trim()).spawn();
     }
 
+    pub fn default_expanded_mode(&self) -> IslandMode {
+        if self.music.is_playing {
+            IslandMode::MusicExpanded
+        } else {
+            IslandMode::Notifications
+        }
+    }
+
     pub fn effective_style_mode(&self) -> f32 {
         if self.app_backdrop_solid && self.is_window_overlapping {
             0.0
@@ -1461,7 +1469,7 @@ impl IslandWidget {
                     {
                         if let Some(start) = self.hover_dwell_start {
                             if start.elapsed() >= Duration::from_millis(70) {
-                                self.set_mode(IslandMode::MusicExpanded);
+                                self.set_mode(self.default_expanded_mode());
                                 self.hover_dwell_start = None;
                             }
                         } else {
@@ -2039,7 +2047,7 @@ impl IslandWidget {
     fn toggle(&mut self) {
         match self.mode {
             IslandMode::Hidden => self.set_mode(IslandMode::CompactPill),
-            IslandMode::CompactPill => self.set_mode(IslandMode::QuickAccess),
+            IslandMode::CompactPill => self.set_mode(self.default_expanded_mode()),
             _ => self.set_mode(IslandMode::CompactPill),
         }
     }
@@ -2423,11 +2431,7 @@ impl IslandWidget {
         {
             if let Some(start) = self.hover_dwell_start {
                 if start.elapsed() >= Duration::from_millis(70) {
-                    if self.music.is_playing {
-                        self.set_mode(IslandMode::MusicExpanded);
-                    } else {
-                        self.set_mode(IslandMode::SystemOverview);
-                    }
+                    self.set_mode(self.default_expanded_mode());
                     self.hover_dwell_start = None;
                 }
             }
