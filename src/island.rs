@@ -528,6 +528,7 @@ pub enum IslandIpcEvent {
     SetAppBackdrop(bool),
     TogglePowerSave,
     SetPowerSave(bool),
+    SetFontScale(f32),
     SetTheme(u32),
     CycleTheme,
     SetDock(IslandDockMode),
@@ -1959,6 +1960,7 @@ impl IslandWidget {
         root_val["style_mode"] = serde_json::json!(self.style_mode);
         root_val["app_backdrop_solid"] = serde_json::json!(self.app_backdrop_solid);
         root_val["power_save"] = serde_json::json!(self.power_save);
+        root_val["font_scale"] = serde_json::json!(glass_core::font::UIFont::global_scale());
         root_val["blur_radius"] = serde_json::json!(self.blur_radius);
         root_val["animation_speed"] = serde_json::json!(self.anim_speed);
 
@@ -2158,6 +2160,11 @@ impl IslandWidget {
                 }
                 IslandIpcEvent::SetPowerSave(v) => {
                     self.power_save = v;
+                    self.needs_redraw = true;
+                    self.save_config();
+                }
+                IslandIpcEvent::SetFontScale(fs) => {
+                    glass_core::font::UIFont::set_global_scale(fs);
                     self.needs_redraw = true;
                     self.save_config();
                 }
@@ -5354,6 +5361,18 @@ fn start_fifo_listener(tx: Sender<IslandIpcEvent>, wakeup_fd: Option<i32>) {
                             send_evt(IslandIpcEvent::SetPowerSave(true));
                         } else if trimmed == "power_save off" || trimmed == "eco off" {
                             send_evt(IslandIpcEvent::SetPowerSave(false));
+                        } else if trimmed == "font_scale +" || trimmed == "font +" {
+                            let cur = glass_core::font::UIFont::global_scale();
+                            send_evt(IslandIpcEvent::SetFontScale(cur + 0.06));
+                        } else if trimmed == "font_scale -" || trimmed == "font -" {
+                            let cur = glass_core::font::UIFont::global_scale();
+                            send_evt(IslandIpcEvent::SetFontScale(cur - 0.06));
+                        } else if trimmed == "font_scale reset" || trimmed == "font reset" {
+                            send_evt(IslandIpcEvent::SetFontScale(1.12));
+                        } else if let Some(rest) = trimmed.strip_prefix("font_scale ") {
+                            if let Ok(v) = rest.trim().parse::<f32>() {
+                                send_evt(IslandIpcEvent::SetFontScale(v));
+                            }
                         } else if trimmed == "theme auto"
                             || trimmed == "auto"
                             || trimmed == "theme 0"

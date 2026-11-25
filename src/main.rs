@@ -454,6 +454,9 @@ impl ShellApp {
                     self.dock.style_mode = s as f32;
                     self.center_hero.style_mode = s as f32;
                 }
+                if let Some(fs) = val.get("font_scale").and_then(|v| v.as_f64()) {
+                    glass_core::font::UIFont::set_global_scale(fs as f32);
+                }
                 if let Some(ps) = val.get("power_save").and_then(|v| v.as_bool()) {
                     self.island.power_save = ps;
                     if let Some(r) = &mut self.island.renderer {
@@ -899,6 +902,7 @@ fn main() {
 
     let mut last_minute = 999u32;
     let mut prev_power_save = false;
+    let mut prev_font_scale = glass_core::font::UIFont::global_scale();
     let mut last_frame = Instant::now();
     let mut last_draw = Instant::now();
     let mut last_config_check = Instant::now();
@@ -1038,6 +1042,16 @@ fn main() {
             app.clock.draw();
             app.todo.draw();
             app.dock.draw();
+        }
+        let cur_fs = glass_core::font::UIFont::global_scale();
+        if (cur_fs - prev_font_scale).abs() > 0.001 {
+            prev_font_scale = cur_fs;
+            app.island.needs_redraw = true;
+            app.clock.needs_redraw = true;
+            app.todo.needs_redraw = true;
+            app.dock.needs_redraw = true;
+            app.launcher.needs_redraw = true;
+            app.center_hero.needs_redraw = true;
         }
         if app.island.power_save != prev_power_save {
             prev_power_save = app.island.power_save;
