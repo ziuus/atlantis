@@ -270,7 +270,7 @@ impl ClockWidget {
     }
 
     pub fn check_window_overlap(&mut self) {
-        if self.last_window_check.elapsed() < Duration::from_millis(1500) {
+        if self.last_window_check.elapsed() < Duration::from_millis(200) {
             return;
         }
         self.last_window_check = Instant::now();
@@ -302,7 +302,7 @@ impl ClockWidget {
                 if is_at_top_edge || self.is_hovered || !self.is_compact {
                     self.is_hidden_by_window = false;
                     self.last_hover_time = Instant::now();
-                } else if self.last_hover_time.elapsed() >= Duration::from_millis(1200) {
+                } else if self.last_hover_time.elapsed() >= Duration::from_millis(400) {
                     self.is_hidden_by_window = true;
                 }
             } else if !self.is_hovered && self.is_compact {

@@ -2266,7 +2266,7 @@ impl IslandWidget {
         }
 
         // When expanded, retract back after 3.0s timeout of no user interaction
-        let retract_timeout = Duration::from_millis(3000);
+        let retract_timeout = Duration::from_millis(1200);
 
         let expanded_idle = !self.is_hovered
             && !self.is_pressed
@@ -2274,6 +2274,7 @@ impl IslandWidget {
             && matches!(
                 self.mode,
                 IslandMode::MusicExpanded
+                    | IslandMode::ControlCenter
                     | IslandMode::QuickAccess
                     | IslandMode::SystemOverview
                     | IslandMode::PowerMenu
@@ -2441,6 +2442,7 @@ impl IslandWidget {
         if self.is_hovered
             || self.is_pressed
             || self.mode == IslandMode::MusicExpanded
+            || self.mode == IslandMode::ControlCenter
             || self.mode == IslandMode::SystemOverview
             || self.mode == IslandMode::QuickAccess
             || self.mode == IslandMode::PowerMenu
@@ -2449,9 +2451,9 @@ impl IslandWidget {
         }
 
         let check_interval = if self.mode == IslandMode::Hidden {
-            Duration::from_millis(250)
+            Duration::from_millis(150)
         } else {
-            Duration::from_millis(350)
+            Duration::from_millis(150)
         };
         if self.last_window_check.elapsed() < check_interval {
             return;
