@@ -1152,7 +1152,7 @@ fn main() {
                 drawn = true;
             }
 
-            if dock_active || app.dock.needs_redraw || app.launcher.needs_redraw {
+            if dock_active || app.dock.needs_redraw {
                 app.dock.draw();
                 app.dock.needs_redraw = false;
                 drawn = true;

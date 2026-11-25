@@ -265,9 +265,6 @@ impl LauncherWidget {
             self.apps = Self::scan_desktop_apps();
         }
         self.refilter();
-        if self.open_spring.value < 0.08 {
-            self.open_spring.value = 0.08;
-        }
         self.open_spring.set_target(1.0);
         if let Some(ls) = &self.layer_surface {
             ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
@@ -308,6 +305,9 @@ impl LauncherWidget {
         if (self.open_spring.value - self.open_spring.target).abs() < 0.002
             && self.open_spring.velocity.abs() < 0.01
         {
+            if !self.open_spring.is_at_rest() {
+                self.needs_redraw = true;
+            }
             self.open_spring.snap_to_target();
         }
         !self.open_spring.is_at_rest()
