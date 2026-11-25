@@ -159,9 +159,9 @@ impl LauncherWidget {
             open_spring: Spring::with_params(
                 0.0,
                 SpringParams {
-                    stiffness: 360.0,
-                    damping: 26.0,
-                    mass: 0.85,
+                    stiffness: 240.0,
+                    damping: 20.0,
+                    mass: 0.9,
                     initial_velocity: 0.0,
                     epsilon: 0.002,
                 },
@@ -261,7 +261,9 @@ impl LauncherWidget {
         self.query.clear();
         self.selected_idx = 0;
         self.scroll_offset = 0;
-        self.apps = Self::scan_desktop_apps();
+        if self.apps.is_empty() {
+            self.apps = Self::scan_desktop_apps();
+        }
         self.refilter();
         self.open_spring.set_target(1.0);
         if let Some(ls) = &self.layer_surface {
@@ -939,14 +941,23 @@ impl LauncherWidget {
 
         if let Some(r) = &mut self.renderer {
             r.update_overlay(self.width, self.height, &self.overlay_buffer);
-            let inset = (1.0 - t) * 0.04;
+            let raw_t = self.open_spring.value;
+            let motion = (1.0 - t).clamp(0.0, 1.0);
+            let inset_x = (1.0 - raw_t).max(-0.02) * 0.11;
+            let inset_y = (1.0 - raw_t).max(-0.02) * 0.09;
+            let y_slide = motion * 0.07;
+            let w_b = (1.0 - inset_x * 2.0).clamp(0.1, 1.04);
+            let h_b = (1.0 - inset_y * 2.0).clamp(0.1, 1.04);
+            let x_b = (0.5 - w_b * 0.5).clamp(0.0, 0.9);
+            let y_b = (inset_y + y_slide).clamp(0.0, 0.9);
+
             let card = GlassSurface::new()
                 .material(Material::LiquidGlass)
                 .shape(Shape::RoundedRectangle { radius: 22.0 })
-                .bounds(inset, inset, 1.0 - inset * 2.0, 1.0 - inset * 2.0)
+                .bounds(x_b, y_b, w_b.min(1.0 - x_b), h_b.min(1.0 - y_b))
                 .curvature(20.0)
-                .bevel(16.0)
-                .refraction(20.0)
+                .bevel(16.0 + motion * 6.0)
+                .refraction(20.0 + motion * 16.0)
                 .dispersion(0.14)
                 .blur(self.blur_radius)
                 .specular(1.25)
