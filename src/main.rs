@@ -1104,10 +1104,8 @@ fn main() {
                 0
             }
         } else {
-            let sec = now_local.second();
-            let sub_ms = now_local.timestamp_subsec_millis();
-            let ms_to_min = ((60 - sec) * 1000 - sub_ms).clamp(50, 60_000);
-            ms_to_min as i32
+            // Cap idle poll timeout to 200ms so window overlap & top-edge hot zone checks are responsive
+            200
         };
 
         let guard = match conn.prepare_read() {

@@ -24,7 +24,7 @@ use wayland_client::{Dispatch, Proxy, QueueHandle};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 
 const FIFO_PATH: &str = "/tmp/liquid_island.fifo";
-pub const COMPACT_PILL_W: f32 = 250.0;
+pub const COMPACT_PILL_W: f32 = 270.0;
 
 struct WindowCache {
     last_check: Instant,
@@ -2239,18 +2239,18 @@ impl IslandWidget {
         }
 
         let check_interval = if self.mode == IslandMode::Hidden {
-            Duration::from_millis(1500)
+            Duration::from_millis(250)
         } else {
-            Duration::from_millis(2500)
+            Duration::from_millis(350)
         };
         if self.last_window_check.elapsed() < check_interval {
             return;
         }
         self.last_window_check = Instant::now();
 
-        // Stable monitor top-center zone: x in 845..1075, y in 0..50
+        // Stable monitor top-center zone: x in 820..1100, y in 0..50
         let mon_w = 1920i32;
-        let check_w = 230i32;
+        let check_w = 280i32;
         let check_x = (mon_w - check_w) / 2;
         let check_y = 0i32;
         let check_h = 50i32;
@@ -2264,7 +2264,7 @@ impl IslandWidget {
         }
 
         if !overlapping {
-            // Always show on desktop, whether previously hidden or not
+            // Always show on desktop when no window is overlapping
             self.hot_edge_dwell_start = None;
             if self.mode == IslandMode::Hidden {
                 self.set_mode(IslandMode::CompactPill);
@@ -2272,33 +2272,26 @@ impl IslandWidget {
         } else {
             // Apps/windows are overlapping underneath the island zone
             if let Some((cx, cy)) = Self::query_hyprland_cursor() {
-                // Reaching top edge: x in [780, 1140], y <= 6
-                let is_at_top_edge = (780..=1140).contains(&cx) && cy <= 6;
+                // Reaching top edge: x in [700, 1220], y <= 8
+                let is_at_top_edge = (700..=1220).contains(&cx) && cy <= 8;
                 let island_w = self.current_w as i32;
-                let island_left = (mon_w - island_w) / 2;
-                let island_right = island_left + island_w;
-                let island_bottom = (self.current_y + self.current_h + 12.0) as i32;
+                let island_left = (mon_w - island_w) / 2 - 12;
+                let island_right = (mon_w + island_w) / 2 + 12;
+                let island_bottom = (self.current_y + self.current_h + 16.0) as i32;
                 let is_inside_island =
                     (island_left..=island_right).contains(&cx) && (0..=island_bottom).contains(&cy);
 
-                if is_at_top_edge {
+                if is_at_top_edge || is_inside_island {
                     if self.mode == IslandMode::Hidden {
                         self.set_mode(IslandMode::CompactPill);
                     }
                     self.last_interaction = Instant::now();
                     self.hot_edge_dwell_start = None;
-                } else if is_inside_island && self.mode != IslandMode::Hidden {
-                    self.last_interaction = Instant::now();
-                    self.hot_edge_dwell_start = None;
-                } else if self.mode != IslandMode::Hidden
-                    && self.last_interaction.elapsed() >= Duration::from_millis(1500)
-                {
+                } else if self.mode != IslandMode::Hidden {
                     self.hot_edge_dwell_start = None;
                     self.set_mode(IslandMode::Hidden);
                 }
-            } else if self.mode != IslandMode::Hidden
-                && self.last_interaction.elapsed() >= Duration::from_millis(1500)
-            {
+            } else if self.mode != IslandMode::Hidden {
                 self.hot_edge_dwell_start = None;
                 self.set_mode(IslandMode::Hidden);
             }
@@ -2317,7 +2310,7 @@ impl IslandWidget {
 
         if let Ok(mut lock) = CURSOR_CACHE.lock() {
             if let Some(ref c) = *lock {
-                if c.last_check.elapsed() < Duration::from_millis(250) {
+                if c.last_check.elapsed() < Duration::from_millis(80) {
                     return c.pos;
                 }
             }
@@ -2390,7 +2383,7 @@ impl IslandWidget {
         };
 
         let cache_valid = if let Some(ref c) = *lock {
-            c.last_check.elapsed() < Duration::from_millis(2000)
+            c.last_check.elapsed() < Duration::from_millis(300)
         } else {
             false
         };
@@ -2618,18 +2611,9 @@ impl IslandWidget {
                         );
                     }
                 } else {
-                    // ── Idle / Paused Mode (Dynamic Status Island) ──
-                    // Left: Clean Clock Lucide Icon + Time
-                    let clock_icon_x = island_cx - island_w * 0.5 + 20.0;
-                    UIFont::draw_clock_icon(
-                        buf,
-                        self.width,
-                        self.height,
-                        clock_icon_x,
-                        island_cy,
-                        col_ink,
-                    );
-
+                    // ── Clean, Luxurious Idle Dynamic Island (Apple & Tide-Island Inspired) ──
+                    // Left: Clean Clock Time (e.g. "10:05 AM" in Plus Jakarta Sans)
+                    let left_x = island_cx - island_w * 0.5 + 24.0;
                     let now = chrono::Local::now();
                     let time_str = now.format("%I:%M %p").to_string();
                     self.font.draw_text(
@@ -2637,49 +2621,47 @@ impl IslandWidget {
                         self.width,
                         self.height,
                         &time_str,
-                        clock_icon_x + 13.0,
+                        left_x,
                         island_cy - 6.0,
                         Tokens::TYPE_BODY_SM,
                         col_ink,
                         FontWeight::Bold,
                     );
 
-                    // Center-Right: Volume badge [Speaker Icon] [Percentage]
-                    let spk_icon_x = island_cx + 12.0;
-                    Self::draw_speaker_icon(
-                        buf,
-                        self.width,
-                        self.height,
-                        spk_icon_x,
-                        island_cy,
-                        col_ink,
-                        !self.sys_stats.vol_muted,
-                    );
-                    let vol_str = if self.sys_stats.vol_muted {
-                        "Mute".to_string()
+                    // Center: Subtle pulse dot (Apple Emerald when charging, subtle accent otherwise)
+                    let dot_col = if self.sys_stats.bat_charging {
+                        [52, 199, 89, 220] // Apple Emerald
+                    } else if is_light {
+                        [100, 115, 130, 90]
                     } else {
-                        format!("{}%", self.sys_stats.vol_pct)
+                        [180, 195, 215, 90]
                     };
-                    self.font.draw_text(
+                    UIFont::draw_rounded_rect_fill(
                         buf,
                         self.width,
                         self.height,
-                        &vol_str,
-                        spk_icon_x + 12.0,
-                        island_cy - 6.0,
-                        Tokens::TYPE_BODY_SM,
-                        if self.sys_stats.vol_muted { col_dim } else { col_ink },
-                        FontWeight::SemiBold,
+                        island_cx + 12.0,
+                        island_cy,
+                        2.2,
+                        2.2,
+                        2.2,
+                        dot_col,
                     );
 
-                    // Far-Right: Battery badge [Percentage] [Battery Icon]
-                    let bat_pct_str = if self.sys_stats.bat_charging {
-                        format!("⚡{}%", self.sys_stats.bat_pct)
+                    // Right: Crisp, legible Battery Percentage & Lucide Icon
+                    let bat_pct = self.sys_stats.bat_pct;
+                    let bat_pct_str = format!("{}%", bat_pct);
+                    let bat_icon_x = island_cx + island_w * 0.5 - 24.0;
+                    let bat_text_x = bat_icon_x - 36.0;
+
+                    let bat_text_col = if self.sys_stats.bat_charging {
+                        [52, 199, 89, 255]
+                    } else if bat_pct < 20 {
+                        [255, 149, 10, 255]
                     } else {
-                        format!("{}%", self.sys_stats.bat_pct)
+                        col_ink
                     };
-                    let bat_icon_x = island_cx + island_w * 0.5 - 20.0;
-                    let bat_text_x = bat_icon_x - 38.0;
+
                     self.font.draw_text(
                         buf,
                         self.width,
@@ -2688,7 +2670,7 @@ impl IslandWidget {
                         bat_text_x,
                         island_cy - 6.0,
                         Tokens::TYPE_BODY_SM,
-                        col_ink,
+                        bat_text_col,
                         FontWeight::SemiBold,
                     );
 
@@ -2698,7 +2680,7 @@ impl IslandWidget {
                         self.height,
                         bat_icon_x,
                         island_cy,
-                        self.sys_stats.bat_pct,
+                        bat_pct,
                         self.sys_stats.bat_charging,
                         col_ink,
                     );
@@ -3652,9 +3634,7 @@ impl IslandWidget {
         self.check_ipc();
         self.check_music();
         self.check_window_overlap();
-        if self.mode == IslandMode::SystemOverview {
-            self.sys_stats.poll();
-        }
+        self.sys_stats.poll();
 
         self.render_ui_overlay();
 
