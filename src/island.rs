@@ -1342,6 +1342,39 @@ impl IslandWidget {
                         self.power_held = None;
                     }
 
+                    let in_cc_slider = self.mode == IslandMode::ControlCenter
+                        && self.press_pos[1] >= self.current_y + 76.0
+                        && self.press_pos[1] <= self.current_y + 138.0;
+                    if in_cc_slider {
+                        let island_cx = (self.width as f32) * 0.5;
+                        let slider_left = island_cx - self.current_w * 0.5 + 54.0;
+                        let slider_right = island_cx + self.current_w * 0.5 - 66.0;
+                        let slider_w = (slider_right - slider_left).max(80.0);
+                        let ratio = ((lx - slider_left) / slider_w).clamp(0.0, 1.0);
+                        if (self.press_pos[1] - (self.current_y + 92.0)).abs() <= 14.0 {
+                            let pct = (ratio * 100.0).round() as u32;
+                            if pct != self.sys_stats.vol_pct {
+                                let arg = format!("{}%", pct);
+                                let _ = Command::new("wpctl")
+                                    .args(["set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", &arg])
+                                    .spawn();
+                                self.sys_stats.vol_pct = pct;
+                                self.sys_stats.last_poll = Instant::now();
+                                self.needs_redraw = true;
+                            }
+                        } else if (self.press_pos[1] - (self.current_y + 122.0)).abs() <= 14.0 {
+                            let pct = (ratio * 100.0).round().max(5.0) as u32;
+                            if pct != self.sys_stats.brightness_pct {
+                                let arg = format!("{}%", pct);
+                                let _ = Command::new("brightnessctl").args(["set", &arg]).spawn();
+                                self.sys_stats.brightness_pct = pct;
+                                self.sys_stats.last_poll = Instant::now();
+                                self.needs_redraw = true;
+                            }
+                        }
+                        return true;
+                    }
+
                     if !self.is_swiping
                         && dx.abs() > 55.0
                         && self.press_time.elapsed() >= Duration::from_millis(80)
@@ -4216,7 +4249,8 @@ impl IslandWidget {
         }
 
         // Double-click detection: collapses expanded island or expands compact pill
-        if !is_track_nav {
+        // Exempt ControlCenter so rapid slider/toggle clicks don't collapse the panel
+        if !is_track_nav && self.mode != IslandMode::ControlCenter {
             let click_dt = self.last_click_time.elapsed();
             let click_dx = lx - self.last_click_pos[0];
             let click_dy = ly - self.last_click_pos[1];
@@ -4240,19 +4274,20 @@ impl IslandWidget {
         self.last_click_time = Instant::now();
         self.last_click_pos = [lx, ly];
 
-        // Page dot clicks across all expanded modes
-        let dot_start_x = island_cx + island_w * 0.5 - 56.0;
-        let dot_y = island_top + 24.0;
+        // Page dot clicks across all 5 expanded modes
+        let dot_start_x = island_cx + island_w * 0.5 - 76.0;
+        let dot_y = island_top + 22.0;
         if ly >= dot_y - 12.0
             && ly <= dot_y + 12.0
             && lx >= dot_start_x - 8.0
-            && lx <= dot_start_x + 45.0
+            && lx <= dot_start_x + 56.0
         {
-            let dot_idx = (((lx - dot_start_x + 5.0) / 11.0).floor() as usize).min(3);
+            let dot_idx = (((lx - dot_start_x + 5.0) / 11.0).floor() as usize).min(4);
             match dot_idx {
                 0 => self.set_mode(IslandMode::MusicExpanded),
-                1 => self.set_mode(IslandMode::SystemOverview),
-                2 => self.set_mode(IslandMode::QuickAccess),
+                1 => self.set_mode(IslandMode::ControlCenter),
+                2 => self.set_mode(IslandMode::SystemOverview),
+                3 => self.set_mode(IslandMode::QuickAccess),
                 _ => self.set_mode(IslandMode::PowerMenu),
             }
             return;
@@ -4354,6 +4389,7 @@ impl IslandWidget {
                                     self.sys_stats.vol_muted = !self.sys_stats.vol_muted;
                                 }
                             }
+                            self.sys_stats.last_poll = Instant::now();
                             self.needs_redraw = true;
                             return;
                         }
