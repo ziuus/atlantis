@@ -197,6 +197,10 @@ pub struct DockWidget {
 
     pub style_mode: f32,
     pub theme_mode: u32,
+    /// Customizable accent color (RGB). Default: Apple-blue [18, 108, 224].
+    pub accent_color: [u8; 3],
+    /// When true, primary text uses exact #000 / #FFF.
+    pub pure_bw: bool,
     pub blur_radius: f32,
     pub anim_speed: f32,
 
@@ -321,6 +325,8 @@ impl DockWidget {
 
             style_mode: 2.0,
             theme_mode: 0,
+            accent_color: [18, 108, 224],
+            pure_bw: false,
             blur_radius: 0.0,
             anim_speed: 1.0,
 

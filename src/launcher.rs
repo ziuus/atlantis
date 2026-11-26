@@ -105,6 +105,10 @@ pub struct LauncherWidget {
     pub panel_spring: Spring,
     pub style_mode: f32,
     pub theme_mode: u32,
+    /// Customizable accent color (RGB). Default: Apple-blue [18, 108, 224].
+    pub accent_color: [u8; 3],
+    /// When true, primary text uses exact #000 / #FFF.
+    pub pure_bw: bool,
     pub blur_radius: f32,
     pub anim_speed: f32,
     pub is_wallpaper_light: bool,
@@ -201,6 +205,8 @@ impl LauncherWidget {
             ),
             style_mode: 2.0,
             theme_mode: 0,
+            accent_color: [18, 108, 224],
+            pure_bw: false,
             blur_radius: 0.0,
             anim_speed: 1.0,
             is_wallpaper_light: false,
@@ -1022,19 +1028,24 @@ impl LauncherWidget {
         let buf = &mut buf_vec[..];
         let a = (255.0 * t) as u8;
         let col_ink = if is_light {
-            [10, 14, 24, a]
+            if self.pure_bw { [0, 0, 0, a] } else { [10, 14, 24, a] }
         } else {
-            [245, 247, 252, a]
+            if self.pure_bw { [255, 255, 255, a] } else { [245, 247, 252, a] }
         };
+        let ac = self.accent_color;
         let col_dim = if is_light {
-            [42, 56, 76, (175.0 * t) as u8]
+            if self.pure_bw { [0, 0, 0, (175.0 * t) as u8] } else { [42, 56, 76, (175.0 * t) as u8] }
         } else {
-            [205, 218, 238, (175.0 * t) as u8]
+            if self.pure_bw { [ac[0], ac[1], ac[2], (175.0 * t) as u8] } else { [205, 218, 238, (175.0 * t) as u8] }
         };
         let col_accent = if is_light {
-            [18, 108, 224, (220.0 * t) as u8]
+            [ac[0], ac[1], ac[2], (220.0 * t) as u8]
         } else {
-            [115, 190, 255, (230.0 * t) as u8]
+            // Lighten accent for dark bg: blend toward white
+            let lr = (ac[0] as u16 + 97).min(255) as u8;
+            let lg = (ac[1] as u16 + 82).min(255) as u8;
+            let lb = (ac[2] as u16 + 31).min(255) as u8;
+            [lr, lg, lb, (230.0 * t) as u8]
         };
         let pill_bg = if is_light {
             [0, 0, 0, (16.0 * t) as u8]

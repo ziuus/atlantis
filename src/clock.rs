@@ -156,6 +156,10 @@ pub struct ClockWidget {
     pub sys_stats: SysStats,
     pub style_mode: f32,
     pub theme_mode: u32,
+    /// Customizable accent color (RGB). Default: Apple-blue [18, 108, 224].
+    pub accent_color: [u8; 3],
+    /// When true, primary text uses exact #000 / #FFF instead of near-black/near-white.
+    pub pure_bw: bool,
     pub blur_radius: f32,
     pub anim_speed: f32,
     pub enabled: bool,
@@ -334,6 +338,8 @@ impl ClockWidget {
             sys_stats: SysStats::new(),
             style_mode: 2.0,
             theme_mode: 0,
+            accent_color: [18, 108, 224],
+            pure_bw: false,
             blur_radius: 6.0,
             anim_speed: 1.0,
             enabled: true,
@@ -1208,14 +1214,15 @@ impl ClockWidget {
             let comp_alpha = ((0.35 - t) / 0.35).clamp(0.0, 1.0);
             let alpha_u8 = (255.0 * comp_alpha) as u8;
             let ink_col = if is_light {
-                [10, 14, 24, alpha_u8]
+                if self.pure_bw { [0, 0, 0, alpha_u8] } else { [10, 14, 24, alpha_u8] }
             } else {
-                [250, 252, 255, alpha_u8]
+                if self.pure_bw { [255, 255, 255, alpha_u8] } else { [250, 252, 255, alpha_u8] }
             };
+            let ac = self.accent_color;
             let sub_ink = if is_light {
-                [45, 60, 80, (210.0 * comp_alpha) as u8]
+                if self.pure_bw { [0, 0, 0, (210.0 * comp_alpha) as u8] } else { [45, 60, 80, (210.0 * comp_alpha) as u8] }
             } else {
-                [200, 215, 235, (200.0 * comp_alpha) as u8]
+                if self.pure_bw { [ac[0], ac[1], ac[2], (200.0 * comp_alpha) as u8] } else { [200, 215, 235, (200.0 * comp_alpha) as u8] }
             };
             let div_ink = if is_light {
                 [25, 40, 60, (26.0 * comp_alpha) as u8]

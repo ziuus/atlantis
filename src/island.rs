@@ -665,6 +665,10 @@ pub struct IslandWidget {
     pub dnd_enabled: bool,
     pub opened_via_shortcut: bool,
     pub theme_mode: u32,
+    /// Customizable accent color (RGB). Default: Apple-blue [18, 108, 224].
+    pub accent_color: [u8; 3],
+    /// When true, primary text uses exact #000 / #FFF.
+    pub pure_bw: bool,
     pub blur_radius: f32,
     pub anim_speed: f32,
     pub hover_to_expand: bool,
@@ -1265,6 +1269,8 @@ impl IslandWidget {
             dnd_enabled: false,
             opened_via_shortcut: false,
             theme_mode,
+            accent_color: [18, 108, 224],
+            pure_bw: false,
             blur_radius,
             anim_speed,
             hover_to_expand,
@@ -1951,6 +1957,8 @@ impl IslandWidget {
         root_val["font_scale"] = serde_json::json!(glass_core::font::UIFont::global_scale());
         root_val["blur_radius"] = serde_json::json!(self.blur_radius);
         root_val["animation_speed"] = serde_json::json!(self.anim_speed);
+        root_val["accent_color"] = serde_json::json!([self.accent_color[0], self.accent_color[1], self.accent_color[2]]);
+        root_val["pure_bw"] = serde_json::json!(self.pure_bw);
 
         // Island component section
         let mut island_obj = root_val

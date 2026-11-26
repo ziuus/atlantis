@@ -433,6 +433,28 @@ fn parse_theme_mode(val: &serde_json::Value) -> Option<u32> {
     None
 }
 
+/// Parse a color from JSON: `[r, g, b]` array or `"#rrggbb"` hex string.
+fn parse_color(val: &serde_json::Value) -> Option<[u8; 3]> {
+    if let Some(arr) = val.as_array() {
+        if arr.len() >= 3 {
+            let r = arr[0].as_u64()? as u8;
+            let g = arr[1].as_u64()? as u8;
+            let b = arr[2].as_u64()? as u8;
+            return Some([r, g, b]);
+        }
+    }
+    if let Some(s) = val.as_str() {
+        let s = s.trim_start_matches('#');
+        if s.len() == 6 {
+            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+            return Some([r, g, b]);
+        }
+    }
+    None
+}
+
 impl ShellApp {
     pub fn reload_config(&mut self, conf_path: &str) {
         if let Ok(content) = std::fs::read_to_string(conf_path) {
@@ -485,6 +507,23 @@ impl ShellApp {
                     self.todo.app_backdrop_solid = ab;
                     self.dock.app_backdrop_solid = ab;
                     self.launcher.app_backdrop_solid = ab;
+                }
+                // accent_color: accepts [r,g,b] array or "#rrggbb" hex string
+                if let Some(ac_val) = val.get("accent_color") {
+                    let ac = parse_color(ac_val).unwrap_or([18, 108, 224]);
+                    self.clock.accent_color = ac;
+                    self.island.accent_color = ac;
+                    self.todo.accent_color = ac;
+                    self.dock.accent_color = ac;
+                    self.launcher.accent_color = ac;
+                }
+                // pure_bw: exact #000/#fff for primary text ink
+                if let Some(bw) = val.get("pure_bw").and_then(|v| v.as_bool()) {
+                    self.clock.pure_bw = bw;
+                    self.island.pure_bw = bw;
+                    self.todo.pure_bw = bw;
+                    self.dock.pure_bw = bw;
+                    self.launcher.pure_bw = bw;
                 }
                 if let Some(b) = val
                     .get("blur_radius")
