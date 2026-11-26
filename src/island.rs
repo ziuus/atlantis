@@ -2575,13 +2575,11 @@ impl IslandWidget {
 
     pub fn check_music(&mut self) {
         let poll_interval = if self.power_save {
-            Duration::from_secs(30)
+            Duration::from_secs(10)
         } else if self.music.is_playing {
-            Duration::from_millis(2000)
-        } else if self.mode == IslandMode::MusicExpanded {
-            Duration::from_millis(3000)
+            Duration::from_millis(1500)
         } else {
-            Duration::from_secs(30)
+            Duration::from_millis(2500)
         };
         if self.last_music_poll.elapsed() < poll_interval {
             return;
@@ -2644,15 +2642,18 @@ impl IslandWidget {
                                 if art_url.starts_with("file://") {
                                     let raw_path = art_url.trim_start_matches("file://");
                                     let clean_path = raw_path.replace("%20", " ");
-                                    if let Ok(img) = image::open(&clean_path) {
-                                        let thumb = img
-                                            .resize_exact(46, 46, image::imageops::FilterType::Triangle)
-                                            .to_rgba8();
-                                        let small = img
-                                            .resize_exact(22, 22, image::imageops::FilterType::Triangle)
-                                            .to_rgba8();
-                                        self.music.art_thumbnail = Some(thumb.into_raw());
-                                        self.music.art_thumb_small = Some(small.into_raw());
+                                    if let Ok(bytes) = std::fs::read(&clean_path) {
+                                        if let Ok(img) = image::load_from_memory(&bytes) {
+                                            let thumb = img
+                                                .resize_exact(46, 46, image::imageops::FilterType::Triangle)
+                                                .to_rgba8();
+                                            let small = img
+                                                .resize_exact(22, 22, image::imageops::FilterType::Triangle)
+                                                .to_rgba8();
+                                            self.music.art_thumbnail = Some(thumb.into_raw());
+                                            self.music.art_thumb_small = Some(small.into_raw());
+                                            self.needs_redraw = true;
+                                        }
                                     }
                                 } else if art_url.starts_with("http://") || art_url.starts_with("https://") {
                                     let slot = self.music.art_pending.clone();
@@ -2750,6 +2751,7 @@ impl IslandWidget {
         // Never auto-collapse if user is actively interacting or looking at an expanded page!
         if self.is_hovered
             || self.is_pressed
+            || self.music.is_playing
             || self.mode == IslandMode::MusicExpanded
             || self.mode == IslandMode::Notifications
             || self.mode == IslandMode::ControlCenter
