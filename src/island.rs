@@ -1270,7 +1270,7 @@ impl IslandWidget {
             opened_via_shortcut: false,
             theme_mode,
             accent_color: [18, 108, 224],
-            pure_bw: false,
+            pure_bw: true,
             blur_radius,
             anim_speed,
             hover_to_expand,

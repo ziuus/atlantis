@@ -508,6 +508,29 @@ impl ShellApp {
                     self.dock.app_backdrop_solid = ab;
                     self.launcher.app_backdrop_solid = ab;
                 }
+                // color_theme: "bw" (default pure #000/#fff), "slate"/"glass", or named accent ("ocean", "purple", "emerald", "crimson", "amber")
+                if let Some(ct) = val.get("color_theme").and_then(|v| v.as_str()) {
+                    let (bw, ac) = match ct.to_lowercase().as_str() {
+                        "bw" | "black_white" | "monochrome" | "default" => (true, [0, 0, 0]),
+                        "slate" | "glass" => (false, [18, 108, 224]),
+                        "ocean" | "blue" => (false, [30, 144, 255]),
+                        "purple" | "violet" => (false, [140, 108, 255]),
+                        "emerald" | "green" => (false, [34, 197, 94]),
+                        "crimson" | "red" => (false, [239, 68, 68]),
+                        "amber" | "gold" => (false, [245, 158, 11]),
+                        _ => (true, [0, 0, 0]),
+                    };
+                    self.clock.pure_bw = bw;
+                    self.island.pure_bw = bw;
+                    self.todo.pure_bw = bw;
+                    self.dock.pure_bw = bw;
+                    self.launcher.pure_bw = bw;
+                    self.clock.accent_color = ac;
+                    self.island.accent_color = ac;
+                    self.todo.accent_color = ac;
+                    self.dock.accent_color = ac;
+                    self.launcher.accent_color = ac;
+                }
                 // accent_color: accepts [r,g,b] array or "#rrggbb" hex string
                 if let Some(ac_val) = val.get("accent_color") {
                     let ac = parse_color(ac_val).unwrap_or([18, 108, 224]);

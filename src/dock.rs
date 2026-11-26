@@ -326,7 +326,7 @@ impl DockWidget {
             style_mode: 2.0,
             theme_mode: 0,
             accent_color: [18, 108, 224],
-            pure_bw: false,
+            pure_bw: true,
             blur_radius: 0.0,
             anim_speed: 1.0,
 
