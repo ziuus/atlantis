@@ -317,6 +317,8 @@ pub struct NotificationData {
     pub timestamp: Instant,
 }
 
+type ArtPendingSlot = std::sync::Arc<std::sync::Mutex<Option<(String, Vec<u8>, Vec<u8>)>>>;
+
 #[derive(Debug, Clone)]
 pub struct MusicState {
     pub title: String,
@@ -328,6 +330,8 @@ pub struct MusicState {
     pub elapsed_sec: f32,
     pub art_url: String,
     pub art_thumbnail: Option<Vec<u8>>,
+    pub art_thumb_small: Option<Vec<u8>>,
+    pub art_pending: ArtPendingSlot,
     pub disc_rotation: f32,
 }
 
@@ -1227,6 +1231,8 @@ impl IslandWidget {
                 elapsed_sec: 0.0,
                 art_url: String::new(),
                 art_thumbnail: None,
+                art_thumb_small: None,
+                art_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 disc_rotation: 0.0,
             },
             last_music_poll: Instant::now() - Duration::from_secs(10),
@@ -1335,7 +1341,7 @@ impl IslandWidget {
             } else {
                 match self.mode {
                     IslandMode::CompactPill => {
-                        let pill_w = COMPACT_PILL_W as i32;
+                        let pill_w = self.target_w as i32;
                         let pill_h = (self.target_y + Tokens::ISLAND_COMPACT_H) as i32;
                         let pill_x = (self.width as i32 - pill_w) / 2;
                         region.add(pill_x, 0, pill_w, pill_h);
@@ -1735,7 +1741,11 @@ impl IslandWidget {
                 self.target_alpha = 0.0;
             }
             IslandMode::CompactPill => {
-                self.target_w = COMPACT_PILL_W;
+                self.target_w = if self.music.is_playing {
+                    236.0
+                } else {
+                    COMPACT_PILL_W
+                };
                 self.target_h = Tokens::ISLAND_COMPACT_H;
                 self.target_y = dock_y;
                 self.target_alpha = 1.0;
@@ -2470,7 +2480,13 @@ impl IslandWidget {
             } else {
                 self.hud = None;
                 self.target_w = match self.mode {
-                    IslandMode::CompactPill => COMPACT_PILL_W,
+                    IslandMode::CompactPill => {
+                        if self.music.is_playing {
+                            236.0
+                        } else {
+                            COMPACT_PILL_W
+                        }
+                    }
                     IslandMode::Notification => 420.0,
                     IslandMode::Hidden => 160.0,
                     _ => Tokens::ISLAND_EXPANDED_W,
@@ -2578,6 +2594,19 @@ impl IslandWidget {
                 let status_str = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
                 let was_playing = self.music.is_playing;
                 self.music.is_playing = status_str.contains("playing");
+                if self.mode == IslandMode::CompactPill && self.hud.is_none() {
+                    let desired_w = if self.music.is_playing {
+                        236.0
+                    } else {
+                        COMPACT_PILL_W
+                    };
+                    if (self.target_w - desired_w).abs() > 0.5 {
+                        self.target_w = desired_w;
+                        self.animating = true;
+                        self.needs_input_region_update = true;
+                        self.needs_redraw = true;
+                    }
+                }
                 if self.music.is_playing && !was_playing && self.mode == IslandMode::Hidden {
                     self.set_mode(IslandMode::CompactPill);
                 }
@@ -2611,19 +2640,54 @@ impl IslandWidget {
                             if art_url != self.music.art_url {
                                 self.music.art_url = art_url.clone();
                                 self.music.art_thumbnail = None;
+                                self.music.art_thumb_small = None;
                                 if art_url.starts_with("file://") {
                                     let raw_path = art_url.trim_start_matches("file://");
                                     let clean_path = raw_path.replace("%20", " ");
                                     if let Ok(img) = image::open(&clean_path) {
                                         let thumb = img
-                                            .resize_exact(
-                                                46,
-                                                46,
-                                                image::imageops::FilterType::Triangle,
-                                            )
+                                            .resize_exact(46, 46, image::imageops::FilterType::Triangle)
+                                            .to_rgba8();
+                                        let small = img
+                                            .resize_exact(22, 22, image::imageops::FilterType::Triangle)
                                             .to_rgba8();
                                         self.music.art_thumbnail = Some(thumb.into_raw());
+                                        self.music.art_thumb_small = Some(small.into_raw());
                                     }
+                                } else if art_url.starts_with("http://") || art_url.starts_with("https://") {
+                                    let slot = self.music.art_pending.clone();
+                                    let url_clone = art_url.clone();
+                                    std::thread::spawn(move || {
+                                        if let Ok(out) = Command::new("curl")
+                                            .args(["-sL", "--max-time", "4", &url_clone])
+                                            .output()
+                                        {
+                                            if out.status.success() && !out.stdout.is_empty() {
+                                                if let Ok(img) = image::load_from_memory(&out.stdout) {
+                                                    let thumb = img
+                                                        .resize_exact(46, 46, image::imageops::FilterType::Triangle)
+                                                        .to_rgba8()
+                                                        .into_raw();
+                                                    let small = img
+                                                        .resize_exact(22, 22, image::imageops::FilterType::Triangle)
+                                                        .to_rgba8()
+                                                        .into_raw();
+                                                    if let Ok(mut guard) = slot.lock() {
+                                                        *guard = Some((url_clone, thumb, small));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                        if let Ok(mut guard) = self.music.art_pending.lock() {
+                            if let Some((url, big, small)) = guard.take() {
+                                if url == self.music.art_url {
+                                    self.music.art_thumbnail = Some(big);
+                                    self.music.art_thumb_small = Some(small);
+                                    self.needs_redraw = true;
                                 }
                             }
                         }
@@ -2749,6 +2813,23 @@ impl IslandWidget {
                 self.hot_edge_dwell_start = None;
                 self.set_mode(IslandMode::Hidden);
             }
+        }
+    }
+
+    pub fn switch_workspace(ws: usize) {
+        let ws_str = ws.to_string();
+        if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+            let _ = Command::new("hyprctl")
+                .args(["dispatch", "workspace", &ws_str])
+                .spawn();
+        } else if std::env::var_os("SWAYSOCK").is_some() {
+            let _ = Command::new("swaymsg")
+                .args(["workspace", "number", &ws_str])
+                .spawn();
+        } else if std::env::var_os("NIRI_SOCKET").is_some() {
+            let _ = Command::new("niri")
+                .args(["msg", "action", "focus-workspace", &ws_str])
+                .spawn();
         }
     }
 
@@ -3068,20 +3149,58 @@ impl IslandWidget {
 
                 if self.music.is_playing {
                     // ── Active Music Playing Mode ──
-                    // Left: Realistic Spinning Vinyl Record Disc (11px radius)
-                    UIFont::draw_spinning_vinyl(
-                        buf,
-                        self.width,
-                        self.height,
-                        disc_cx,
-                        island_cy,
-                        11.0,
-                        self.music.disc_rotation,
-                        is_light,
-                    );
+                    // Left: Album Art Thumbnail (22x22) or Spinning Vinyl fallback
+                    if let Some(small) = &self.music.art_thumb_small {
+                        UIFont::draw_rounded_thumbnail(
+                            buf,
+                            self.width,
+                            self.height,
+                            disc_cx,
+                            island_cy,
+                            small,
+                            22,
+                            22,
+                            11.0,
+                        );
+                        UIFont::draw_rounded_rect_stroke(
+                            buf,
+                            self.width,
+                            self.height,
+                            disc_cx,
+                            island_cy,
+                            11.0,
+                            11.0,
+                            11.0,
+                            0.9,
+                            if is_light { [0, 0, 0, 70] } else { [255, 255, 255, 90] },
+                        );
+                    } else {
+                        UIFont::draw_spinning_vinyl(
+                            buf,
+                            self.width,
+                            self.height,
+                            disc_cx,
+                            island_cy,
+                            11.0,
+                            self.music.disc_rotation,
+                            is_light,
+                        );
+                    }
 
-                    // Center: Track Title
-                    let title = safe_truncate(&self.music.title, 16);
+                    // Center: Track Title (measured to never overlap thumbnail or equalizer)
+                    let max_title_w = (island_w - 86.0).max(40.0);
+                    let mut title = self.music.title.clone();
+                    if self.font.measure_text(&title, Tokens::TYPE_BODY_SM, FontWeight::SemiBold) > max_title_w {
+                        let mut chars: Vec<char> = title.chars().collect();
+                        while !chars.is_empty() {
+                            chars.pop();
+                            let cand: String = chars.iter().collect::<String>() + "…";
+                            if self.font.measure_text(&cand, Tokens::TYPE_BODY_SM, FontWeight::SemiBold) <= max_title_w {
+                                title = cand;
+                                break;
+                            }
+                        }
+                    }
                     self.font.draw_text_centered(
                         buf,
                         self.width,
@@ -3098,15 +3217,15 @@ impl IslandWidget {
                     // Right: Dynamic animated 3-bar equalizer
                     let t_sec = self.start_time.elapsed().as_secs_f32();
                     for i in 0..3 {
-                        let bx = right_x - 6.0 + (i as f32) * 6.0;
-                        let wave = ((t_sec * (6.0 + i as f32 * 2.0)).sin() * 0.5 + 0.5) * 5.0 + 2.5;
+                        let bx = right_x - 6.0 + (i as f32) * 4.5;
+                        let wave = ((t_sec * (6.0 + i as f32 * 2.0)).sin() * 0.5 + 0.5) * 4.5 + 2.2;
                         UIFont::draw_rounded_rect_fill(
                             buf,
                             self.width,
                             self.height,
                             bx,
                             island_cy,
-                            1.2,
+                            1.0,
                             wave,
                             1.0,
                             col_ink,
@@ -3277,6 +3396,24 @@ impl IslandWidget {
                 let disc_r = 21.0;
 
                 if let Some(thumb) = &self.music.art_thumbnail {
+                    // Pulsing audio-reactive halo ring behind thumbnail when playing
+                    if self.music.is_playing {
+                        let pulse = (self.start_time.elapsed().as_secs_f32() * 4.2).sin() * 0.5 + 0.5;
+                        let halo_r = disc_r + 2.0 + pulse * 1.5;
+                        let halo_a = (45.0 + pulse * 55.0) as u8;
+                        UIFont::draw_rounded_rect_stroke(
+                            buf,
+                            self.width,
+                            self.height,
+                            disc_cx,
+                            disc_cy,
+                            halo_r,
+                            halo_r,
+                            halo_r,
+                            1.2,
+                            if is_light { [0, 0, 0, halo_a] } else { [255, 255, 255, halo_a] },
+                        );
+                    }
                     // Full circular thumbnail clip (corner_radius = 21.0)
                     UIFont::draw_rounded_thumbnail(
                         buf,
@@ -3357,6 +3494,31 @@ impl IslandWidget {
                     col_dim,
                     FontWeight::Medium,
                 );
+
+                // Top-right 6-bar Audio Spectrum Visualizer
+                let t_sec = self.start_time.elapsed().as_secs_f32();
+                let eq_base_x = cx + island_w * 0.5 - 50.0;
+                for i in 0..6 {
+                    let bx = eq_base_x + (i as f32) * 5.0;
+                    let amp = if self.music.is_playing {
+                        ((t_sec * (5.2 + i as f32 * 1.35) + i as f32 * 0.9).sin() * 0.5 + 0.5)
+                            * 8.5
+                            + 2.5
+                    } else {
+                        2.0
+                    };
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        bx,
+                        disc_cy,
+                        1.3,
+                        amp,
+                        1.0,
+                        if self.music.is_playing { col_ink } else { col_dim },
+                    );
+                }
 
                 // Tier 2: Floating Timestamps & Continuous Seekbar
                 let bar_w = island_w - 56.0;
@@ -4340,6 +4502,51 @@ impl IslandWidget {
                     FontWeight::Bold,
                 );
 
+                // Header center: Interactive Workspace Switcher (1..=5)
+                let active_ws = Self::query_active_workspace().clamp(1, 5) as usize;
+                let ws_y = island_top + 22.0;
+                let ws_step = 24.0f32;
+                let ws_start_x = cx - 2.0 * ws_step;
+                for ws in 1..=5 {
+                    let wx = ws_start_x + ((ws - 1) as f32) * ws_step;
+                    let is_act = ws == active_ws;
+                    let bg = if is_act {
+                        if is_light { [0, 0, 0, 220] } else { [255, 255, 255, 235] }
+                    } else if is_light {
+                        [0, 0, 0, 14]
+                    } else {
+                        [255, 255, 255, 20]
+                    };
+                    UIFont::draw_rounded_rect_fill(
+                        buf,
+                        self.width,
+                        self.height,
+                        wx,
+                        ws_y,
+                        9.5,
+                        9.5,
+                        6.0,
+                        bg,
+                    );
+                    let lbl_col = if is_act {
+                        if is_light { [255, 255, 255, 255] } else { [0, 0, 0, 255] }
+                    } else {
+                        col_ink
+                    };
+                    self.font.draw_text_centered(
+                        buf,
+                        self.width,
+                        self.height,
+                        &ws.to_string(),
+                        wx,
+                        ws_y,
+                        10.5,
+                        lbl_col,
+                        col_shadow,
+                        FontWeight::SemiBold,
+                    );
+                }
+
                 // 4 Metric cards with live progress bars: CPU (+Temp), RAM, Battery, Disk
                 let ram_ratio = (self.sys_stats.ram_used_gb / self.sys_stats.ram_total_gb.max(0.1))
                     .clamp(0.0, 1.0);
@@ -4946,6 +5153,13 @@ impl IslandWidget {
                 if d_disc <= 18.0 && self.music.is_playing {
                     let _ = Command::new("playerctl").args(["play-pause"]).spawn();
                     self.music.is_playing = !self.music.is_playing;
+                } else if !self.music.is_playing && (lx - island_cx).abs() <= 28.0 && (ly - island_cy).abs() <= 14.0 {
+                    // Clickable workspace dots 1..=5 in CompactPill
+                    let step = 11.0f32;
+                    let start_x = island_cx - 2.0 * step;
+                    let ws = (((lx - start_x) / step).round() as i32 + 1).clamp(1, 5) as usize;
+                    Self::switch_workspace(ws);
+                    self.needs_redraw = true;
                 } else if d_bell <= 18.0 && !self.music.is_playing {
                     self.set_mode(IslandMode::Notifications);
                 } else if self.music.is_playing {
@@ -5147,6 +5361,16 @@ impl IslandWidget {
                 }
             }
             IslandMode::SystemOverview => {
+                // Header workspace switcher pills 1..=5
+                let ws_y = island_top + 22.0;
+                let ws_step = 24.0f32;
+                let ws_start_x = island_cx - 2.0 * ws_step;
+                if (ly - ws_y).abs() <= 13.0 && lx >= ws_start_x - 14.0 && lx <= ws_start_x + 4.0 * ws_step + 14.0 {
+                    let ws = (((lx - ws_start_x) / ws_step).round() as i32 + 1).clamp(1, 5) as usize;
+                    Self::switch_workspace(ws);
+                    self.needs_redraw = true;
+                    return;
+                }
                 let item_w = (island_w - 52.0) / 4.0;
                 let start_x = island_cx - island_w * 0.5 + 26.0 + item_w * 0.5;
                 let cy = island_top + 78.0;

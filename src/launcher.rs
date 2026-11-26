@@ -345,14 +345,12 @@ impl LauncherWidget {
     {
         self.needs_input_region_update = false;
         let region = compositor.wl_compositor().create_region(qh, ());
-        if self.is_open || self.open_spring.value > 0.02 {
+        if self.is_open {
             region.add(0, 0, self.width as i32, self.height as i32);
         }
         self.surface.set_input_region(Some(&region));
         region.destroy();
-        if !self.needs_redraw {
-            self.surface.commit();
-        }
+        self.surface.commit();
     }
 
     pub fn update_physics(&mut self, dt: f32) -> bool {
@@ -374,6 +372,7 @@ impl LauncherWidget {
         {
             if !self.open_spring.is_at_rest() {
                 self.needs_redraw = true;
+                self.needs_input_region_update = true;
             }
             self.open_spring.snap_to_target();
         }
