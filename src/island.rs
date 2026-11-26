@@ -1439,7 +1439,7 @@ impl IslandWidget {
                     }
                 } else {
                     self.is_hovered = false;
-        self.opened_via_shortcut = false;
+                    self.opened_via_shortcut = false;
                     self.hover_dwell_start = None;
                     if let Some(ls) = &self.layer_surface {
                         ls.set_keyboard_interactivity(KeyboardInteractivity::None);
@@ -1451,7 +1451,7 @@ impl IslandWidget {
             PointerEventKind::Leave { .. } => {
                 self.is_hovered = false;
                 self.opened_via_shortcut = false;
-        self.opened_via_shortcut = false;
+                self.opened_via_shortcut = false;
                 self.is_pressed = false;
                 self.is_swiping = false;
                 self.hot_edge_dwell_start = None;
@@ -1496,7 +1496,7 @@ impl IslandWidget {
                     }
                 } else {
                     self.is_hovered = false;
-        self.opened_via_shortcut = false;
+                    self.opened_via_shortcut = false;
                     self.hover_dwell_start = None;
                 }
 
@@ -1974,7 +1974,11 @@ impl IslandWidget {
         root_val["font_scale"] = serde_json::json!(glass_core::font::UIFont::global_scale());
         root_val["blur_radius"] = serde_json::json!(self.blur_radius);
         root_val["animation_speed"] = serde_json::json!(self.anim_speed);
-        root_val["accent_color"] = serde_json::json!([self.accent_color[0], self.accent_color[1], self.accent_color[2]]);
+        root_val["accent_color"] = serde_json::json!([
+            self.accent_color[0],
+            self.accent_color[1],
+            self.accent_color[2]
+        ]);
         root_val["pure_bw"] = serde_json::json!(self.pure_bw);
 
         // Island component section
@@ -2568,7 +2572,10 @@ impl IslandWidget {
         let is_active = !settling
             || (!self.power_save
                 && self.music.is_playing
-                && matches!(self.mode, IslandMode::CompactPill | IslandMode::MusicExpanded))
+                && matches!(
+                    self.mode,
+                    IslandMode::CompactPill | IslandMode::MusicExpanded
+                ))
             || self.mode == IslandMode::Notification
             || (!self.power_save
                 && self.hover_dwell_start.is_some()
@@ -3026,7 +3033,8 @@ impl IslandWidget {
                     if stream.write_all(b"j/activeworkspace").is_ok() {
                         let mut buf = vec![0u8; 8192];
                         if let Ok(n) = stream.read(&mut buf) {
-                            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&buf[..n]) {
+                            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&buf[..n])
+                            {
                                 active_ws_id = val.get("id").and_then(|id| id.as_i64());
                             }
                         }
@@ -3040,9 +3048,8 @@ impl IslandWidget {
                         if stream.write_all(b"j/clients").is_ok() {
                             let mut buf = vec![0u8; 65536];
                             if let Ok(n) = stream.read(&mut buf) {
-                            let resp = &buf[..n];
-                            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(resp)
-                                {
+                                let resp = &buf[..n];
+                                if let Ok(val) = serde_json::from_slice::<serde_json::Value>(resp) {
                                     if let Some(arr) = val.as_array() {
                                         for client in arr {
                                             let mapped = client
@@ -3161,14 +3168,30 @@ impl IslandWidget {
 
         let is_light = self.effective_is_light();
         let col_ink = if is_light {
-            if self.pure_bw { [0, 0, 0, 255] } else { [8, 12, 20, 255] }
+            if self.pure_bw {
+                [0, 0, 0, 255]
+            } else {
+                [8, 12, 20, 255]
+            }
         } else {
-            if self.pure_bw { [255, 255, 255, 255] } else { Tokens::TEXT_PRIMARY }
+            if self.pure_bw {
+                [255, 255, 255, 255]
+            } else {
+                Tokens::TEXT_PRIMARY
+            }
         };
         let col_dim = if is_light {
-            if self.pure_bw { [0, 0, 0, 255] } else { [18, 24, 34, 255] }
+            if self.pure_bw {
+                [0, 0, 0, 255]
+            } else {
+                [18, 24, 34, 255]
+            }
         } else {
-            if self.pure_bw { [255, 255, 255, 255] } else { [235, 240, 252, 255] }
+            if self.pure_bw {
+                [255, 255, 255, 255]
+            } else {
+                [235, 240, 252, 255]
+            }
         };
         let col_shadow = [0, 0, 0, 0];
 
@@ -3215,7 +3238,11 @@ impl IslandWidget {
                             11.0,
                             thumb_r,
                             0.9,
-                            if is_light { [0, 0, 0, 70] } else { [255, 255, 255, 90] },
+                            if is_light {
+                                [0, 0, 0, 70]
+                            } else {
+                                [255, 255, 255, 90]
+                            },
                         );
                     } else {
                         UIFont::draw_spinning_vinyl(
@@ -3233,12 +3260,21 @@ impl IslandWidget {
                     // Center: Track Title (measured to never overlap thumbnail or equalizer)
                     let max_title_w = (island_w - 86.0).max(40.0);
                     let mut title = self.music.title.clone();
-                    if self.font.measure_text(&title, Tokens::TYPE_BODY_SM, FontWeight::SemiBold) > max_title_w {
+                    if self
+                        .font
+                        .measure_text(&title, Tokens::TYPE_BODY_SM, FontWeight::SemiBold)
+                        > max_title_w
+                    {
                         let mut chars: Vec<char> = title.chars().collect();
                         while !chars.is_empty() {
                             chars.pop();
                             let cand: String = chars.iter().collect::<String>() + "…";
-                            if self.font.measure_text(&cand, Tokens::TYPE_BODY_SM, FontWeight::SemiBold) <= max_title_w {
+                            if self.font.measure_text(
+                                &cand,
+                                Tokens::TYPE_BODY_SM,
+                                FontWeight::SemiBold,
+                            ) <= max_title_w
+                            {
                                 title = cand;
                                 break;
                             }
@@ -3277,9 +3313,17 @@ impl IslandWidget {
                 } else {
                     // ── Sleek Compact Dynamic Island (164px: Media Icon • Workspace Dots • Bell) ──
                     let col_dim_icon = if is_light {
-                        if self.pure_bw { [0, 0, 0, 180] } else { [8, 12, 20, 150] }
+                        if self.pure_bw {
+                            [0, 0, 0, 180]
+                        } else {
+                            [8, 12, 20, 150]
+                        }
                     } else {
-                        if self.pure_bw { [255, 255, 255, 180] } else { [245, 247, 250, 150] }
+                        if self.pure_bw {
+                            [255, 255, 255, 180]
+                        } else {
+                            [245, 247, 250, 150]
+                        }
                     };
 
                     // Left: Hairline music note icon (ready for playback)
@@ -3314,9 +3358,17 @@ impl IslandWidget {
                             );
                         } else {
                             let dot_c = if is_light {
-                                if self.pure_bw { [0, 0, 0, 80] } else { [8, 12, 20, 65] }
+                                if self.pure_bw {
+                                    [0, 0, 0, 80]
+                                } else {
+                                    [8, 12, 20, 65]
+                                }
                             } else {
-                                if self.pure_bw { [255, 255, 255, 80] } else { [245, 247, 250, 65] }
+                                if self.pure_bw {
+                                    [255, 255, 255, 80]
+                                } else {
+                                    [245, 247, 250, 65]
+                                }
                             };
                             UIFont::draw_rounded_rect_fill(
                                 buf,
@@ -3434,11 +3486,21 @@ impl IslandWidget {
         match mode {
             IslandMode::MusicExpanded => {
                 // Tier 1: Video 16:9 Preview OR Circular Album Art + Track Title + Artist • Album
-                let disc_cx = cx - island_w * 0.5 + if self.music.is_video && self.music.art_thumb_wide.is_some() { 60.0 } else { 46.0 };
+                let disc_cx = cx - island_w * 0.5
+                    + if self.music.is_video && self.music.art_thumb_wide.is_some() {
+                        60.0
+                    } else {
+                        46.0
+                    };
                 let disc_cy = island_top + 36.0;
                 let disc_r = 21.0;
 
-                if let Some(wide) = self.music.art_thumb_wide.as_ref().filter(|_| self.music.is_video) {
+                if let Some(wide) = self
+                    .music
+                    .art_thumb_wide
+                    .as_ref()
+                    .filter(|_| self.music.is_video)
+                {
                     UIFont::draw_rounded_thumbnail(
                         buf,
                         self.width,
@@ -3460,12 +3522,17 @@ impl IslandWidget {
                         21.0,
                         8.0,
                         1.0,
-                        if is_light { [0, 0, 0, 55] } else { [255, 255, 255, 85] },
+                        if is_light {
+                            [0, 0, 0, 55]
+                        } else {
+                            [255, 255, 255, 85]
+                        },
                     );
                 } else if let Some(thumb) = &self.music.art_thumbnail {
                     // Pulsing audio-reactive halo ring behind thumbnail when playing
                     if self.music.is_playing {
-                        let pulse = (self.start_time.elapsed().as_secs_f32() * 4.2).sin() * 0.5 + 0.5;
+                        let pulse =
+                            (self.start_time.elapsed().as_secs_f32() * 4.2).sin() * 0.5 + 0.5;
                         let halo_r = disc_r + 2.0 + pulse * 1.5;
                         let halo_a = (45.0 + pulse * 55.0) as u8;
                         UIFont::draw_rounded_rect_stroke(
@@ -3478,7 +3545,11 @@ impl IslandWidget {
                             halo_r,
                             halo_r,
                             1.2,
-                            if is_light { [0, 0, 0, halo_a] } else { [255, 255, 255, halo_a] },
+                            if is_light {
+                                [0, 0, 0, halo_a]
+                            } else {
+                                [255, 255, 255, halo_a]
+                            },
                         );
                     }
                     // Full circular thumbnail clip (corner_radius = 21.0)
@@ -3523,7 +3594,12 @@ impl IslandWidget {
                 }
 
                 // Track Title & Subtitle
-                let title_x = cx - island_w * 0.5 + if self.music.is_video && self.music.art_thumb_wide.is_some() { 108.0 } else { 78.0 };
+                let title_x = cx - island_w * 0.5
+                    + if self.music.is_video && self.music.art_thumb_wide.is_some() {
+                        108.0
+                    } else {
+                        78.0
+                    };
                 let title = if !self.music.title.is_empty() {
                     safe_truncate(&self.music.title, 26)
                 } else {
@@ -3569,8 +3645,7 @@ impl IslandWidget {
                 for i in 0..6 {
                     let bx = eq_base_x + (i as f32) * 5.0;
                     let amp = if self.music.is_playing {
-                        ((t_sec * (5.2 + i as f32 * 1.35) + i as f32 * 0.9).sin() * 0.5 + 0.5)
-                            * 7.5
+                        ((t_sec * (5.2 + i as f32 * 1.35) + i as f32 * 0.9).sin() * 0.5 + 0.5) * 7.5
                             + 2.0
                     } else {
                         2.0
@@ -3584,7 +3659,11 @@ impl IslandWidget {
                         1.2,
                         amp,
                         1.0,
-                        if self.music.is_playing { col_ink } else { col_dim },
+                        if self.music.is_playing {
+                            col_ink
+                        } else {
+                            col_dim
+                        },
                     );
                 }
 
@@ -4579,7 +4658,11 @@ impl IslandWidget {
                     let wx = ws_start_x + ((ws - 1) as f32) * ws_step;
                     let is_act = ws == active_ws;
                     let bg = if is_act {
-                        if is_light { [0, 0, 0, 220] } else { [255, 255, 255, 235] }
+                        if is_light {
+                            [0, 0, 0, 220]
+                        } else {
+                            [255, 255, 255, 235]
+                        }
                     } else if is_light {
                         [0, 0, 0, 14]
                     } else {
@@ -4597,7 +4680,11 @@ impl IslandWidget {
                         bg,
                     );
                     let lbl_col = if is_act {
-                        if is_light { [255, 255, 255, 255] } else { [0, 0, 0, 255] }
+                        if is_light {
+                            [255, 255, 255, 255]
+                        } else {
+                            [0, 0, 0, 255]
+                        }
                     } else {
                         col_ink
                     };
@@ -5221,7 +5308,10 @@ impl IslandWidget {
                 if d_disc <= 18.0 && self.music.is_playing {
                     let _ = Command::new("playerctl").args(["play-pause"]).spawn();
                     self.music.is_playing = !self.music.is_playing;
-                } else if !self.music.is_playing && (lx - island_cx).abs() <= 28.0 && (ly - island_cy).abs() <= 14.0 {
+                } else if !self.music.is_playing
+                    && (lx - island_cx).abs() <= 28.0
+                    && (ly - island_cy).abs() <= 14.0
+                {
                     // Clickable workspace dots 1..=5 in CompactPill
                     let step = 11.0f32;
                     let start_x = island_cx - 2.0 * step;
@@ -5433,8 +5523,12 @@ impl IslandWidget {
                 let ws_y = island_top + 22.0;
                 let ws_step = 24.0f32;
                 let ws_start_x = island_cx - 2.0 * ws_step;
-                if (ly - ws_y).abs() <= 13.0 && lx >= ws_start_x - 14.0 && lx <= ws_start_x + 4.0 * ws_step + 14.0 {
-                    let ws = (((lx - ws_start_x) / ws_step).round() as i32 + 1).clamp(1, 5) as usize;
+                if (ly - ws_y).abs() <= 13.0
+                    && lx >= ws_start_x - 14.0
+                    && lx <= ws_start_x + 4.0 * ws_step + 14.0
+                {
+                    let ws =
+                        (((lx - ws_start_x) / ws_step).round() as i32 + 1).clamp(1, 5) as usize;
                     Self::switch_workspace(ws);
                     self.needs_redraw = true;
                     return;

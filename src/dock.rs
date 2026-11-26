@@ -908,7 +908,11 @@ impl DockWidget {
 
         let is_light = self.effective_is_light();
         let col_ink = if is_light {
-            if self.pure_bw { [0, 0, 0, 255] } else { [16, 20, 28, 255] }
+            if self.pure_bw {
+                [0, 0, 0, 255]
+            } else {
+                [16, 20, 28, 255]
+            }
         } else {
             [255, 255, 255, 255]
         };
@@ -998,14 +1002,26 @@ impl DockWidget {
                 )
             };
             let item_ink = if item_is_light {
-                if self.pure_bw { [0, 0, 0, 255] } else { [14, 18, 26, 255] }
+                if self.pure_bw {
+                    [0, 0, 0, 255]
+                } else {
+                    [14, 18, 26, 255]
+                }
             } else {
                 [255, 255, 255, 255]
             };
             let item_dim = if item_is_light {
-                if self.pure_bw { [0, 0, 0, 230] } else { [45, 55, 75, 230] }
+                if self.pure_bw {
+                    [0, 0, 0, 230]
+                } else {
+                    [45, 55, 75, 230]
+                }
             } else {
-                if self.pure_bw { [255, 255, 255, 230] } else { [200, 215, 235, 230] }
+                if self.pure_bw {
+                    [255, 255, 255, 230]
+                } else {
+                    [200, 215, 235, 230]
+                }
             };
 
             let icon_col = if self.pressed_item == Some(idx) {

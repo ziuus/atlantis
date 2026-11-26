@@ -1296,18 +1296,50 @@ impl TodoWidget {
         // Apple macOS Typography & Contrast
         let (col_primary, col_secondary, col_dimmed, _col_accent, col_shadow) = if is_light {
             (
-                if self.pure_bw { [0, 0, 0, 255] } else { [8, 12, 20, 255] },
-                if self.pure_bw { [0, 0, 0, 255] } else { [18, 24, 34, 255] },
-                if self.pure_bw { [0, 0, 0, 255] } else { [28, 36, 50, 255] },
-                if self.pure_bw { [0, 0, 0, 255] } else { [8, 12, 18, 255] },
+                if self.pure_bw {
+                    [0, 0, 0, 255]
+                } else {
+                    [8, 12, 20, 255]
+                },
+                if self.pure_bw {
+                    [0, 0, 0, 255]
+                } else {
+                    [18, 24, 34, 255]
+                },
+                if self.pure_bw {
+                    [0, 0, 0, 255]
+                } else {
+                    [28, 36, 50, 255]
+                },
+                if self.pure_bw {
+                    [0, 0, 0, 255]
+                } else {
+                    [8, 12, 18, 255]
+                },
                 [0, 0, 0, 0],
             )
         } else {
             (
-                if self.pure_bw { [255, 255, 255, 255] } else { Tokens::TEXT_PRIMARY },
-                if self.pure_bw { [255, 255, 255, 255] } else { Tokens::TEXT_SECONDARY },
-                if self.pure_bw { [255, 255, 255, 255] } else { Tokens::TEXT_TERTIARY },
-                if self.pure_bw { [255, 255, 255, 255] } else { Tokens::TEXT_PRIMARY },
+                if self.pure_bw {
+                    [255, 255, 255, 255]
+                } else {
+                    Tokens::TEXT_PRIMARY
+                },
+                if self.pure_bw {
+                    [255, 255, 255, 255]
+                } else {
+                    Tokens::TEXT_SECONDARY
+                },
+                if self.pure_bw {
+                    [255, 255, 255, 255]
+                } else {
+                    Tokens::TEXT_TERTIARY
+                },
+                if self.pure_bw {
+                    [255, 255, 255, 255]
+                } else {
+                    Tokens::TEXT_PRIMARY
+                },
                 Tokens::TEXT_SHADOW,
             )
         };
@@ -1315,7 +1347,11 @@ impl TodoWidget {
         // ── Top Segmented Tabs: "Tasks ({count})" & "Agenda" (cy = 32.5) ──
         // Clean Apple / VisionOS Active Ink: Pure White on dark, Obsidian on light
         let selected_ink = if is_light {
-            if self.pure_bw { [0, 0, 0, 255] } else { [12, 16, 24, 255] }
+            if self.pure_bw {
+                [0, 0, 0, 255]
+            } else {
+                [12, 16, 24, 255]
+            }
         } else {
             [255, 255, 255, 255]
         };
@@ -1382,9 +1418,17 @@ impl TodoWidget {
             settings_bg,
         );
         let settings_col = if is_light {
-            if self.pure_bw { [0, 0, 0, 255] } else { [12, 16, 24, 255] }
+            if self.pure_bw {
+                [0, 0, 0, 255]
+            } else {
+                [12, 16, 24, 255]
+            }
         } else {
-            if self.pure_bw { [255, 255, 255, 255] } else { Tokens::TEXT_PRIMARY }
+            if self.pure_bw {
+                [255, 255, 255, 255]
+            } else {
+                Tokens::TEXT_PRIMARY
+            }
         };
         UIFont::draw_settings_icon(buf, content_w, content_h, 330.0, 32.5, settings_col);
 

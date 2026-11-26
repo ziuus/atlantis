@@ -198,7 +198,11 @@ pub fn active_window_rects() -> Vec<(i32, i32, i32, i32)> {
                     {
                         let active_ws = list
                             .iter()
-                            .find(|w| w.get("is_focused").and_then(|v| v.as_bool()).unwrap_or(false))
+                            .find(|w| {
+                                w.get("is_focused")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false)
+                            })
                             .and_then(|w| w.get("workspace_id").and_then(|v| v.as_i64()));
                         if active_ws.is_some() {
                             rects.push((0, 0, 1920, 1080));

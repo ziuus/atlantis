@@ -1071,15 +1071,31 @@ impl LauncherWidget {
         let buf = &mut buf_vec[..];
         let a = (255.0 * t) as u8;
         let col_ink = if is_light {
-            if self.pure_bw { [0, 0, 0, a] } else { [10, 14, 24, a] }
+            if self.pure_bw {
+                [0, 0, 0, a]
+            } else {
+                [10, 14, 24, a]
+            }
         } else {
-            if self.pure_bw { [255, 255, 255, a] } else { [245, 247, 252, a] }
+            if self.pure_bw {
+                [255, 255, 255, a]
+            } else {
+                [245, 247, 252, a]
+            }
         };
         let ac = self.accent_color;
         let col_dim = if is_light {
-            if self.pure_bw { [0, 0, 0, (175.0 * t) as u8] } else { [42, 56, 76, (175.0 * t) as u8] }
+            if self.pure_bw {
+                [0, 0, 0, (175.0 * t) as u8]
+            } else {
+                [42, 56, 76, (175.0 * t) as u8]
+            }
         } else {
-            if self.pure_bw { [255, 255, 255, (175.0 * t) as u8] } else { [205, 218, 238, (175.0 * t) as u8] }
+            if self.pure_bw {
+                [255, 255, 255, (175.0 * t) as u8]
+            } else {
+                [205, 218, 238, (175.0 * t) as u8]
+            }
         };
         let col_accent = if self.pure_bw {
             if is_light {
