@@ -317,7 +317,8 @@ pub struct NotificationData {
     pub timestamp: Instant,
 }
 
-type ArtPendingSlot = std::sync::Arc<std::sync::Mutex<Option<(String, Vec<u8>, Vec<u8>)>>>;
+type ArtPendingPayload = (String, Vec<u8>, Vec<u8>, Vec<u8>, bool);
+type ArtPendingSlot = std::sync::Arc<std::sync::Mutex<Option<ArtPendingPayload>>>;
 
 #[derive(Debug, Clone)]
 pub struct MusicState {
@@ -325,12 +326,15 @@ pub struct MusicState {
     pub artist: String,
     pub album: String,
     pub is_playing: bool,
+    pub is_video: bool,
     pub progress: f32,
     pub duration_sec: f32,
     pub elapsed_sec: f32,
     pub art_url: String,
+    pub media_url: String,
     pub art_thumbnail: Option<Vec<u8>>,
     pub art_thumb_small: Option<Vec<u8>>,
+    pub art_thumb_wide: Option<Vec<u8>>,
     pub art_pending: ArtPendingSlot,
     pub disc_rotation: f32,
 }
@@ -1226,12 +1230,15 @@ impl IslandWidget {
                 artist: String::new(),
                 album: String::new(),
                 is_playing: false,
+                is_video: false,
                 progress: 0.0,
                 duration_sec: 0.0,
                 elapsed_sec: 0.0,
                 art_url: String::new(),
+                media_url: String::new(),
                 art_thumbnail: None,
                 art_thumb_small: None,
+                art_thumb_wide: None,
                 art_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 disc_rotation: 0.0,
             },
@@ -2613,7 +2620,7 @@ impl IslandWidget {
                     .args([
                         "metadata",
                         "--format",
-                        "{{title}}||{{artist}}||{{mpris:length}}||{{mpris:artUrl}}||{{album}}",
+                        "{{title}}||{{artist}}||{{mpris:length}}||{{mpris:artUrl}}||{{album}}||{{xesam:url}}||{{playerName}}",
                     ])
                     .output()
                 {
@@ -2633,67 +2640,101 @@ impl IslandWidget {
                                 }
                             }
                         }
-                        if parts.len() > 3 {
-                            let art_url = parts[3].trim().to_string();
-                            if art_url != self.music.art_url {
-                                self.music.art_url = art_url.clone();
-                                self.music.art_thumbnail = None;
-                                self.music.art_thumb_small = None;
-                                if art_url.starts_with("file://") {
-                                    let raw_path = art_url.trim_start_matches("file://");
-                                    let clean_path = raw_path.replace("%20", " ");
-                                    if let Ok(bytes) = std::fs::read(&clean_path) {
-                                        if let Ok(img) = image::load_from_memory(&bytes) {
-                                            let thumb = img
-                                                .resize_exact(46, 46, image::imageops::FilterType::Triangle)
-                                                .to_rgba8();
-                                            let small = img
-                                                .resize_exact(22, 22, image::imageops::FilterType::Triangle)
-                                                .to_rgba8();
-                                            self.music.art_thumbnail = Some(thumb.into_raw());
-                                            self.music.art_thumb_small = Some(small.into_raw());
-                                            self.needs_redraw = true;
-                                        }
+                        if parts.len() > 4 && !parts[4].is_empty() {
+                            self.music.album = parts[4].trim().to_string();
+                        }
+                        let media_url = parts.get(5).map(|s| s.trim()).unwrap_or("");
+                        let player_name = parts.get(6).map(|s| s.trim().to_ascii_lowercase()).unwrap_or_default();
+                        let lower_m = media_url.to_ascii_lowercase();
+                        let url_is_video = [".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v"]
+                            .iter()
+                            .any(|ext| lower_m.ends_with(ext))
+                            || matches!(player_name.as_str(), "mpv" | "vlc" | "celluloid" | "totem" | "haruna");
+                        let art_url = parts.get(3).map(|s| s.trim().to_string()).unwrap_or_default();
+                        let art_key = if !art_url.is_empty() {
+                            art_url.clone()
+                        } else {
+                            media_url.to_string()
+                        };
+                        if art_key != self.music.art_url || media_url != self.music.media_url {
+                            self.music.art_url = art_key.clone();
+                            self.music.media_url = media_url.to_string();
+                            self.music.art_thumbnail = None;
+                            self.music.art_thumb_small = None;
+                            self.music.art_thumb_wide = None;
+                            self.music.is_video = url_is_video;
+
+                            if art_url.starts_with("file://") {
+                                let raw_path = art_url.trim_start_matches("file://");
+                                let clean_path = raw_path.replace("%20", " ");
+                                if let Ok(bytes) = std::fs::read(&clean_path) {
+                                    if let Ok(img) = image::load_from_memory(&bytes) {
+                                        let is_wide = url_is_video || (img.width() as f32 > img.height() as f32 * 1.15);
+                                        let thumb = img.resize_exact(46, 46, image::imageops::FilterType::Triangle).to_rgba8();
+                                        let small = img.resize_exact(22, 22, image::imageops::FilterType::Triangle).to_rgba8();
+                                        let wide = img.resize_exact(72, 42, image::imageops::FilterType::Triangle).to_rgba8();
+                                        self.music.is_video = is_wide;
+                                        self.music.art_thumbnail = Some(thumb.into_raw());
+                                        self.music.art_thumb_small = Some(small.into_raw());
+                                        self.music.art_thumb_wide = Some(wide.into_raw());
+                                        self.needs_redraw = true;
                                     }
-                                } else if art_url.starts_with("http://") || art_url.starts_with("https://") {
-                                    let slot = self.music.art_pending.clone();
-                                    let url_clone = art_url.clone();
-                                    std::thread::spawn(move || {
-                                        if let Ok(out) = Command::new("curl")
-                                            .args(["-sL", "--max-time", "4", &url_clone])
-                                            .output()
-                                        {
-                                            if out.status.success() && !out.stdout.is_empty() {
-                                                if let Ok(img) = image::load_from_memory(&out.stdout) {
-                                                    let thumb = img
-                                                        .resize_exact(46, 46, image::imageops::FilterType::Triangle)
-                                                        .to_rgba8()
-                                                        .into_raw();
-                                                    let small = img
-                                                        .resize_exact(22, 22, image::imageops::FilterType::Triangle)
-                                                        .to_rgba8()
-                                                        .into_raw();
-                                                    if let Ok(mut guard) = slot.lock() {
-                                                        *guard = Some((url_clone, thumb, small));
-                                                    }
+                                }
+                            } else if art_url.starts_with("http://") || art_url.starts_with("https://") {
+                                let slot = self.music.art_pending.clone();
+                                let url_clone = art_key.clone();
+                                std::thread::spawn(move || {
+                                    if let Ok(out) = Command::new("curl")
+                                        .args(["-sL", "--max-time", "4", &url_clone])
+                                        .output()
+                                    {
+                                        if out.status.success() && !out.stdout.is_empty() {
+                                            if let Ok(img) = image::load_from_memory(&out.stdout) {
+                                                let is_wide = url_is_video || (img.width() as f32 > img.height() as f32 * 1.15);
+                                                let thumb = img.resize_exact(46, 46, image::imageops::FilterType::Triangle).to_rgba8().into_raw();
+                                                let small = img.resize_exact(22, 22, image::imageops::FilterType::Triangle).to_rgba8().into_raw();
+                                                let wide = img.resize_exact(72, 42, image::imageops::FilterType::Triangle).to_rgba8().into_raw();
+                                                if let Ok(mut guard) = slot.lock() {
+                                                    *guard = Some((url_clone, thumb, small, wide, is_wide));
                                                 }
                                             }
                                         }
-                                    });
-                                }
+                                    }
+                                });
+                            } else if url_is_video && media_url.starts_with("file://") {
+                                let slot = self.music.art_pending.clone();
+                                let key_clone = art_key.clone();
+                                let vid_path = media_url.trim_start_matches("file://").replace("%20", " ");
+                                let seek_sec = self.music.elapsed_sec.max(3.0) as u32;
+                                std::thread::spawn(move || {
+                                    if let Ok(out) = Command::new("ffmpeg")
+                                        .args(["-ss", &seek_sec.to_string(), "-i", &vid_path, "-vframes", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
+                                        .output()
+                                    {
+                                        if out.status.success() && !out.stdout.is_empty() {
+                                            if let Ok(img) = image::load_from_memory(&out.stdout) {
+                                                let thumb = img.resize_exact(46, 46, image::imageops::FilterType::Triangle).to_rgba8().into_raw();
+                                                let small = img.resize_exact(22, 22, image::imageops::FilterType::Triangle).to_rgba8().into_raw();
+                                                let wide = img.resize_exact(72, 42, image::imageops::FilterType::Triangle).to_rgba8().into_raw();
+                                                if let Ok(mut guard) = slot.lock() {
+                                                    *guard = Some((key_clone, thumb, small, wide, true));
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
                             }
                         }
                         if let Ok(mut guard) = self.music.art_pending.lock() {
-                            if let Some((url, big, small)) = guard.take() {
+                            if let Some((url, big, small, wide, is_wide)) = guard.take() {
                                 if url == self.music.art_url {
                                     self.music.art_thumbnail = Some(big);
                                     self.music.art_thumb_small = Some(small);
+                                    self.music.art_thumb_wide = Some(wide);
+                                    self.music.is_video = is_wide;
                                     self.needs_redraw = true;
                                 }
                             }
-                        }
-                        if parts.len() > 4 && !parts[4].is_empty() {
-                            self.music.album = parts[4].trim().to_string();
                         }
                     }
                 }
@@ -3152,6 +3193,7 @@ impl IslandWidget {
                     // ── Active Music Playing Mode ──
                     // Left: Album Art Thumbnail (22x22) or Spinning Vinyl fallback
                     if let Some(small) = &self.music.art_thumb_small {
+                        let thumb_r = if self.music.is_video { 5.5 } else { 11.0 };
                         UIFont::draw_rounded_thumbnail(
                             buf,
                             self.width,
@@ -3161,7 +3203,7 @@ impl IslandWidget {
                             small,
                             22,
                             22,
-                            11.0,
+                            thumb_r,
                         );
                         UIFont::draw_rounded_rect_stroke(
                             buf,
@@ -3171,7 +3213,7 @@ impl IslandWidget {
                             island_cy,
                             11.0,
                             11.0,
-                            11.0,
+                            thumb_r,
                             0.9,
                             if is_light { [0, 0, 0, 70] } else { [255, 255, 255, 90] },
                         );
@@ -3391,12 +3433,36 @@ impl IslandWidget {
     ) {
         match mode {
             IslandMode::MusicExpanded => {
-                // Tier 1: Circular Album Art + Track Title + Artist • Album
-                let disc_cx = cx - island_w * 0.5 + 46.0;
+                // Tier 1: Video 16:9 Preview OR Circular Album Art + Track Title + Artist • Album
+                let disc_cx = cx - island_w * 0.5 + if self.music.is_video && self.music.art_thumb_wide.is_some() { 60.0 } else { 46.0 };
                 let disc_cy = island_top + 36.0;
                 let disc_r = 21.0;
 
-                if let Some(thumb) = &self.music.art_thumbnail {
+                if let Some(wide) = self.music.art_thumb_wide.as_ref().filter(|_| self.music.is_video) {
+                    UIFont::draw_rounded_thumbnail(
+                        buf,
+                        self.width,
+                        self.height,
+                        disc_cx,
+                        disc_cy,
+                        wide,
+                        72,
+                        42,
+                        8.0,
+                    );
+                    UIFont::draw_rounded_rect_stroke(
+                        buf,
+                        self.width,
+                        self.height,
+                        disc_cx,
+                        disc_cy,
+                        36.0,
+                        21.0,
+                        8.0,
+                        1.0,
+                        if is_light { [0, 0, 0, 55] } else { [255, 255, 255, 85] },
+                    );
+                } else if let Some(thumb) = &self.music.art_thumbnail {
                     // Pulsing audio-reactive halo ring behind thumbnail when playing
                     if self.music.is_playing {
                         let pulse = (self.start_time.elapsed().as_secs_f32() * 4.2).sin() * 0.5 + 0.5;
@@ -3457,7 +3523,7 @@ impl IslandWidget {
                 }
 
                 // Track Title & Subtitle
-                let title_x = cx - island_w * 0.5 + 78.0;
+                let title_x = cx - island_w * 0.5 + if self.music.is_video && self.music.art_thumb_wide.is_some() { 108.0 } else { 78.0 };
                 let title = if !self.music.title.is_empty() {
                     safe_truncate(&self.music.title, 26)
                 } else {
