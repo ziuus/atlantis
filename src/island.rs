@@ -2741,27 +2741,6 @@ impl IslandWidget {
     }
 
     pub fn check_window_overlap(&mut self) {
-        if !self.auto_hide {
-            if self.mode == IslandMode::Hidden {
-                self.set_mode(IslandMode::CompactPill);
-            }
-            return;
-        }
-
-        // Never auto-collapse if user is actively interacting or looking at an expanded page!
-        if self.is_hovered
-            || self.is_pressed
-            || self.music.is_playing
-            || self.mode == IslandMode::MusicExpanded
-            || self.mode == IslandMode::Notifications
-            || self.mode == IslandMode::ControlCenter
-            || self.mode == IslandMode::SystemOverview
-            || self.mode == IslandMode::QuickAccess
-            || self.mode == IslandMode::PowerMenu
-        {
-            return;
-        }
-
         let check_interval = Duration::from_millis(150);
         if self.last_window_check.elapsed() < check_interval {
             return;
@@ -2781,6 +2760,26 @@ impl IslandWidget {
             self.animating = true;
             self.needs_redraw = true;
             self.needs_input_region_update = true;
+        }
+
+        if !self.auto_hide {
+            if self.mode == IslandMode::Hidden {
+                self.set_mode(IslandMode::CompactPill);
+            }
+            return;
+        }
+
+        // Never auto-collapse if user is actively interacting or looking at an expanded page!
+        if self.is_hovered
+            || self.is_pressed
+            || self.mode == IslandMode::MusicExpanded
+            || self.mode == IslandMode::Notifications
+            || self.mode == IslandMode::ControlCenter
+            || self.mode == IslandMode::SystemOverview
+            || self.mode == IslandMode::QuickAccess
+            || self.mode == IslandMode::PowerMenu
+        {
+            return;
         }
 
         if !overlapping {
@@ -3497,15 +3496,16 @@ impl IslandWidget {
                     FontWeight::Medium,
                 );
 
-                // Top-right 6-bar Audio Spectrum Visualizer
+                // 6-bar Audio Spectrum Visualizer (aligned below page dots, zero overlap)
                 let t_sec = self.start_time.elapsed().as_secs_f32();
-                let eq_base_x = cx + island_w * 0.5 - 50.0;
+                let eq_base_x = cx + island_w * 0.5 - 52.0;
+                let eq_cy = island_top + 52.0;
                 for i in 0..6 {
                     let bx = eq_base_x + (i as f32) * 5.0;
                     let amp = if self.music.is_playing {
                         ((t_sec * (5.2 + i as f32 * 1.35) + i as f32 * 0.9).sin() * 0.5 + 0.5)
-                            * 8.5
-                            + 2.5
+                            * 7.5
+                            + 2.0
                     } else {
                         2.0
                     };
@@ -3514,8 +3514,8 @@ impl IslandWidget {
                         self.width,
                         self.height,
                         bx,
-                        disc_cy,
-                        1.3,
+                        eq_cy,
+                        1.2,
                         amp,
                         1.0,
                         if self.music.is_playing { col_ink } else { col_dim },
