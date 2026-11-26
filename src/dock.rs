@@ -1031,7 +1031,7 @@ impl DockWidget {
             };
 
             // Modern 36x36 squircle app tile behind each dock icon
-            let is_item_hover = self.hovered_item == Some(idx);
+            let is_item_hover = scale > 1.05;
             let tile_hw = if is_item_hover { 19.0 } else { 17.5 };
             let tile_bg = if item_is_light {
                 [
