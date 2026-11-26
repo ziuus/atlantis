@@ -409,27 +409,65 @@ impl LauncherWidget {
         }
     }
 
+    fn collect_desktop_files(dir: &Path, depth: u8, out: &mut Vec<PathBuf>) {
+        if depth > 3 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                Self::collect_desktop_files(&path, depth + 1, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("desktop") {
+                out.push(path);
+            }
+        }
+    }
+
     fn scan_desktop_apps() -> Vec<DesktopApp> {
         let mut seen = HashMap::new();
         let home = std::env::var("HOME").unwrap_or_default();
-        let dirs = [
-            format!("{}/.local/share/applications", home),
-            "/usr/local/share/applications".to_string(),
-            "/usr/share/applications".to_string(),
-        ];
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        if let Ok(xdg_home) = std::env::var("XDG_DATA_HOME") {
+            for p in xdg_home.split(':').filter(|s| !s.is_empty()) {
+                dirs.push(PathBuf::from(p).join("applications"));
+            }
+        } else if !home.is_empty() {
+            dirs.push(PathBuf::from(&home).join(".local/share/applications"));
+        }
+        if !home.is_empty() {
+            dirs.push(PathBuf::from(&home).join(".local/share/flatpak/exports/share/applications"));
+            dirs.push(PathBuf::from(&home).join(".nix-profile/share/applications"));
+        }
+        if let Ok(xdg_dirs) = std::env::var("XDG_DATA_DIRS") {
+            for p in xdg_dirs.split(':').filter(|s| !s.is_empty()) {
+                dirs.push(PathBuf::from(p).join("applications"));
+            }
+        }
+        for fallback in [
+            "/usr/local/share/applications",
+            "/usr/share/applications",
+            "/var/lib/flatpak/exports/share/applications",
+            "/var/lib/snapd/desktop/applications",
+            "/run/current-system/sw/share/applications",
+        ] {
+            dirs.push(PathBuf::from(fallback));
+        }
+
+        let mut visited_dirs = std::collections::HashSet::new();
+        let mut files = Vec::new();
         for dir in dirs {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("desktop") {
-                    continue;
-                }
-                if let Ok(raw) = std::fs::read_to_string(&path) {
-                    if let Some(app) = Self::parse_desktop_file(&raw) {
-                        seen.entry(app.name.clone()).or_insert(app);
-                    }
+            let canon = std::fs::canonicalize(&dir).unwrap_or(dir);
+            if visited_dirs.insert(canon.clone()) {
+                Self::collect_desktop_files(&canon, 0, &mut files);
+            }
+        }
+        for path in files {
+            if let Ok(raw) = std::fs::read_to_string(&path) {
+                if let Some(app) = Self::parse_desktop_file(&raw) {
+                    seen.entry(app.name.clone()).or_insert(app);
                 }
             }
         }
@@ -511,6 +549,8 @@ impl LauncherWidget {
         let home = std::env::var("HOME").unwrap_or_default();
         let bases = [
             format!("{}/.local/share/icons", home),
+            format!("{}/.local/share/flatpak/exports/share/icons", home),
+            "/var/lib/flatpak/exports/share/icons".to_string(),
             "/usr/share/icons".to_string(),
         ];
         let themes = ["hicolor", "Papirus", "Papirus-Dark", "Adwaita", "breeze"];
@@ -526,6 +566,10 @@ impl LauncherWidget {
                     }
                 }
             }
+        }
+        let pixmap = PathBuf::from(format!("/usr/share/pixmaps/{}.png", icon_name));
+        if pixmap.exists() {
+            return Some(pixmap);
         }
 
         let pix = PathBuf::from(format!("/usr/share/pixmaps/{}.png", icon_name));
