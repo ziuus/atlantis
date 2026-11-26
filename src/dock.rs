@@ -1030,6 +1030,65 @@ impl DockWidget {
                 item_ink
             };
 
+            // Modern 36x36 squircle app tile behind each dock icon
+            let is_item_hover = self.hovered_item == Some(idx);
+            let tile_hw = if is_item_hover { 19.0 } else { 17.5 };
+            let tile_bg = if item_is_light {
+                [
+                    0,
+                    0,
+                    0,
+                    if is_item_hover {
+                        28
+                    } else if item.is_focused {
+                        22
+                    } else {
+                        12
+                    },
+                ]
+            } else {
+                [
+                    255,
+                    255,
+                    255,
+                    if is_item_hover {
+                        44
+                    } else if item.is_focused {
+                        34
+                    } else {
+                        20
+                    },
+                ]
+            };
+            let tile_rim = if item_is_light {
+                [0, 0, 0, if is_item_hover { 55 } else { 28 }]
+            } else {
+                [255, 255, 255, if is_item_hover { 80 } else { 42 }]
+            };
+            UIFont::draw_rounded_rect_fill(
+                buf,
+                self.width,
+                self.height,
+                item_cx,
+                item_cy,
+                tile_hw,
+                tile_hw,
+                10.5,
+                tile_bg,
+            );
+            UIFont::draw_rounded_rect_stroke(
+                buf,
+                self.width,
+                self.height,
+                item_cx,
+                item_cy,
+                tile_hw,
+                tile_hw,
+                10.5,
+                1.0,
+                tile_rim,
+            );
+
             match item.icon.as_str() {
                 "terminal" => UIFont::draw_terminal_icon(
                     buf,
