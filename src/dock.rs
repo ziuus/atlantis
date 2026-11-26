@@ -730,11 +730,7 @@ impl DockWidget {
                 let inside = self.is_inside(px, py);
                 self.is_hovered = inside;
                 if let Some(ls) = &self.layer_surface {
-                    ls.set_keyboard_interactivity(if inside {
-                        KeyboardInteractivity::Exclusive
-                    } else {
-                        KeyboardInteractivity::None
-                    });
+                    ls.set_keyboard_interactivity(KeyboardInteractivity::None);
                 }
                 if inside {
                     self.last_hover_time = Instant::now();
@@ -1006,11 +1002,10 @@ impl DockWidget {
             } else {
                 [255, 255, 255, 255]
             };
-            let ac = self.accent_color;
             let item_dim = if item_is_light {
                 if self.pure_bw { [0, 0, 0, 230] } else { [45, 55, 75, 230] }
             } else {
-                if self.pure_bw { [ac[0], ac[1], ac[2], 230] } else { [200, 215, 235, 230] }
+                if self.pure_bw { [255, 255, 255, 230] } else { [200, 215, 235, 230] }
             };
 
             let icon_col = if self.pressed_item == Some(idx) {

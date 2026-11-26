@@ -676,7 +676,7 @@ impl ClockWidget {
             self.opened_via_shortcut = true;
             self.expand();
             if let Some(ls) = &self.layer_surface {
-                ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+                ls.set_keyboard_interactivity(KeyboardInteractivity::None);
             }
             self.needs_redraw = true;
         } else {
@@ -806,11 +806,7 @@ impl ClockWidget {
                 let inside = self.is_inside(px, py);
                 self.is_hovered = inside;
                 if let Some(ls) = &self.layer_surface {
-                    ls.set_keyboard_interactivity(if inside {
-                        KeyboardInteractivity::Exclusive
-                    } else {
-                        KeyboardInteractivity::None
-                    });
+                    ls.set_keyboard_interactivity(KeyboardInteractivity::None);
                 }
                 if inside {
                     self.last_hover_time = Instant::now();
@@ -1218,11 +1214,10 @@ impl ClockWidget {
             } else {
                 if self.pure_bw { [255, 255, 255, alpha_u8] } else { [250, 252, 255, alpha_u8] }
             };
-            let ac = self.accent_color;
             let sub_ink = if is_light {
                 if self.pure_bw { [0, 0, 0, (210.0 * comp_alpha) as u8] } else { [45, 60, 80, (210.0 * comp_alpha) as u8] }
             } else {
-                if self.pure_bw { [ac[0], ac[1], ac[2], (200.0 * comp_alpha) as u8] } else { [200, 215, 235, (200.0 * comp_alpha) as u8] }
+                if self.pure_bw { [255, 255, 255, (200.0 * comp_alpha) as u8] } else { [200, 215, 235, (200.0 * comp_alpha) as u8] }
             };
             let div_ink = if is_light {
                 [25, 40, 60, (26.0 * comp_alpha) as u8]
@@ -1371,14 +1366,14 @@ impl ClockWidget {
             let slide_y = (1.0 - t) * -20.0;
 
             let col_p = if is_light {
-                [10, 14, 22, alpha_u8]
+                if self.pure_bw { [0, 0, 0, alpha_u8] } else { [10, 14, 22, alpha_u8] }
             } else {
                 [255, 255, 255, alpha_u8]
             };
             let col_sub = if is_light {
-                [50, 65, 85, (230.0 * exp_alpha) as u8]
+                if self.pure_bw { [0, 0, 0, (230.0 * exp_alpha) as u8] } else { [50, 65, 85, (230.0 * exp_alpha) as u8] }
             } else {
-                [215, 228, 245, (230.0 * exp_alpha) as u8]
+                if self.pure_bw { [255, 255, 255, (230.0 * exp_alpha) as u8] } else { [215, 228, 245, (230.0 * exp_alpha) as u8] }
             };
             let tile_base = if is_light { [0, 0, 0] } else { [255, 255, 255] };
 

@@ -1036,9 +1036,17 @@ impl LauncherWidget {
         let col_dim = if is_light {
             if self.pure_bw { [0, 0, 0, (175.0 * t) as u8] } else { [42, 56, 76, (175.0 * t) as u8] }
         } else {
-            if self.pure_bw { [ac[0], ac[1], ac[2], (175.0 * t) as u8] } else { [205, 218, 238, (175.0 * t) as u8] }
+            if self.pure_bw { [255, 255, 255, (175.0 * t) as u8] } else { [205, 218, 238, (175.0 * t) as u8] }
         };
-        let col_accent = if is_light {
+        let col_accent = if self.pure_bw {
+            if is_light {
+                [0, 0, 0, (220.0 * t) as u8]
+            } else if ac == [0, 0, 0] {
+                [255, 255, 255, (230.0 * t) as u8]
+            } else {
+                [ac[0], ac[1], ac[2], (230.0 * t) as u8]
+            }
+        } else if is_light {
             [ac[0], ac[1], ac[2], (220.0 * t) as u8]
         } else {
             // Lighten accent for dark bg: blend toward white

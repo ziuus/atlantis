@@ -1406,7 +1406,7 @@ impl IslandWidget {
                     self.is_hovered = true;
                     self.last_interaction = Instant::now();
                     if let Some(ls) = &self.layer_surface {
-                        ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+                        ls.set_keyboard_interactivity(KeyboardInteractivity::None);
                     }
                     self.needs_input_region_update = true;
                     return true;
@@ -1415,7 +1415,7 @@ impl IslandWidget {
                     self.is_hovered = true;
                     self.last_interaction = Instant::now();
                     if let Some(ls) = &self.layer_surface {
-                        ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+                        ls.set_keyboard_interactivity(KeyboardInteractivity::None);
                     }
                     self.needs_input_region_update = true;
                     if self.hover_to_expand
@@ -2061,7 +2061,7 @@ impl IslandWidget {
                 self.set_mode(self.default_expanded_mode());
                 self.last_interaction = Instant::now();
                 if let Some(ls) = &self.layer_surface {
-                    ls.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
+                    ls.set_keyboard_interactivity(KeyboardInteractivity::None);
                 }
                 self.needs_input_region_update = true;
                 self.needs_redraw = true;
@@ -2898,12 +2898,12 @@ impl IslandWidget {
 
                 let mut active_ws_id = None;
                 if let Ok(mut stream) = UnixStream::connect(&sock_path) {
-                    let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
+                    let _ = stream.set_read_timeout(Some(Duration::from_millis(80)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(80)));
                     if stream.write_all(b"j/activeworkspace").is_ok() {
-                        let mut resp = Vec::new();
-                        if stream.read_to_end(&mut resp).is_ok() {
-                            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&resp) {
+                        let mut buf = vec![0u8; 8192];
+                        if let Ok(n) = stream.read(&mut buf) {
+                            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&buf[..n]) {
                                 active_ws_id = val.get("id").and_then(|id| id.as_i64());
                             }
                         }
@@ -2912,12 +2912,13 @@ impl IslandWidget {
 
                 if let Some(ws_id) = active_ws_id {
                     if let Ok(mut stream) = UnixStream::connect(&sock_path) {
-                        let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-                        let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
+                        let _ = stream.set_read_timeout(Some(Duration::from_millis(80)));
+                        let _ = stream.set_write_timeout(Some(Duration::from_millis(80)));
                         if stream.write_all(b"j/clients").is_ok() {
-                            let mut resp = Vec::new();
-                            if stream.read_to_end(&mut resp).is_ok() {
-                                if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&resp)
+                            let mut buf = vec![0u8; 65536];
+                            if let Ok(n) = stream.read(&mut buf) {
+                            let resp = &buf[..n];
+                            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(resp)
                                 {
                                     if let Some(arr) = val.as_array() {
                                         for client in arr {
@@ -3044,8 +3045,7 @@ impl IslandWidget {
         let col_dim = if is_light {
             if self.pure_bw { [0, 0, 0, 255] } else { [18, 24, 34, 255] }
         } else {
-            let ac = self.accent_color;
-            if self.pure_bw { [ac[0], ac[1], ac[2], 255] } else { [235, 240, 252, 255] }
+            if self.pure_bw { [255, 255, 255, 255] } else { [235, 240, 252, 255] }
         };
         let col_shadow = [0, 0, 0, 0];
 
@@ -3115,9 +3115,9 @@ impl IslandWidget {
                 } else {
                     // ── Sleek Compact Dynamic Island (164px: Media Icon • Workspace Dots • Bell) ──
                     let col_dim_icon = if is_light {
-                        [8, 12, 20, 150]
+                        if self.pure_bw { [0, 0, 0, 180] } else { [8, 12, 20, 150] }
                     } else {
-                        [245, 247, 250, 150]
+                        if self.pure_bw { [255, 255, 255, 180] } else { [245, 247, 250, 150] }
                     };
 
                     // Left: Hairline music note icon (ready for playback)
@@ -3152,9 +3152,9 @@ impl IslandWidget {
                             );
                         } else {
                             let dot_c = if is_light {
-                                [8, 12, 20, 65]
+                                if self.pure_bw { [0, 0, 0, 80] } else { [8, 12, 20, 65] }
                             } else {
-                                [245, 247, 250, 65]
+                                if self.pure_bw { [255, 255, 255, 80] } else { [245, 247, 250, 65] }
                             };
                             UIFont::draw_rounded_rect_fill(
                                 buf,
@@ -4777,6 +4777,16 @@ impl IslandWidget {
         self.check_music();
         self.check_window_overlap();
         self.sys_stats.poll();
+
+        // Safety: if compact/hidden and idle >1s, always release keyboard to prevent sticky focus
+        if matches!(self.mode, IslandMode::CompactPill | IslandMode::Hidden)
+            && !self.is_hovered
+            && self.last_interaction.elapsed() > Duration::from_millis(1000)
+        {
+            if let Some(ls) = &self.layer_surface {
+                ls.set_keyboard_interactivity(KeyboardInteractivity::None);
+            }
+        }
 
         self.render_ui_overlay();
 
