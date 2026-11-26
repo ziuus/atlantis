@@ -217,6 +217,7 @@ pub struct DockWidget {
     pub needs_input_region_update: bool,
 
     pub items: Vec<DockItem>,
+    pub icon_cache: std::collections::HashMap<String, Vec<u8>>,
     pub last_client_poll: Instant,
     pub pressed_item: Option<usize>,
 
@@ -343,6 +344,7 @@ impl DockWidget {
             needs_input_region_update: true,
 
             items: DockItem::defaults(),
+            icon_cache: std::collections::HashMap::new(),
             last_client_poll: Instant::now(),
             pressed_item: None,
 
@@ -519,6 +521,99 @@ impl DockWidget {
                 }
             }
         }
+    }
+
+    fn resolve_app_icon(item: &DockItem) -> Option<Vec<u8>> {
+        let cmd = item
+            .command
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let mut names = vec![
+            cmd.clone(),
+            item.class.to_ascii_lowercase(),
+            item.icon.to_ascii_lowercase(),
+        ];
+        match cmd.as_str() {
+            "foot" => names.extend(["foot".into(), "utilities-terminal".into()]),
+            "brave" | "brave-browser" => names.extend([
+                "brave-desktop".into(),
+                "brave-browser".into(),
+                "brave".into(),
+            ]),
+            "code" | "code-oss" => names.extend([
+                "com.visualstudio.code.oss".into(),
+                "visual-studio-code".into(),
+                "vscode".into(),
+                "code".into(),
+            ]),
+            "thunar" => names.extend([
+                "org.xfce.thunar".into(),
+                "org.xfce.filemanager".into(),
+                "system-file-manager".into(),
+                "Thunar".into(),
+            ]),
+            "spotify" => names.extend(["spotify".into(), "spotify-client".into()]),
+            "firefox" => names.extend(["firefox".into(), "firefox-esr".into()]),
+            _ => {}
+        }
+        let home = std::env::var("HOME").unwrap_or_default();
+        let bases = [
+            format!("{}/.local/share/icons", home),
+            format!("{}/.local/share/flatpak/exports/share/icons", home),
+            "/var/lib/flatpak/exports/share/icons".to_string(),
+            "/usr/share/icons".to_string(),
+        ];
+        let themes = [
+            "Papirus",
+            "Papirus-Dark",
+            "hicolor",
+            "Adwaita",
+            "AdwaitaLegacy",
+            "breeze",
+        ];
+        let sizes = ["256x256", "128x128", "64x64", "48x48", "32x32"];
+        let subdirs = ["apps", "legacy"];
+
+        for name in names.iter().filter(|n| !n.is_empty()) {
+            for base in &bases {
+                for theme in &themes {
+                    for sz in &sizes {
+                        for sub in &subdirs {
+                            let cand = std::path::PathBuf::from(format!(
+                                "{}/{}/{}/{}/{}.png",
+                                base, theme, sz, sub, name
+                            ));
+                            if cand.exists() {
+                                if let Ok(img) = image::open(&cand) {
+                                    return Some(
+                                        img.resize_exact(
+                                            34,
+                                            34,
+                                            image::imageops::FilterType::Lanczos3,
+                                        )
+                                        .to_rgba8()
+                                        .into_raw(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let pixmap = std::path::PathBuf::from(format!("/usr/share/pixmaps/{}.png", name));
+            if pixmap.exists() {
+                if let Ok(img) = image::open(&pixmap) {
+                    return Some(
+                        img.resize_exact(34, 34, image::imageops::FilterType::Lanczos3)
+                            .to_rgba8()
+                            .into_raw(),
+                    );
+                }
+            }
+        }
+        None
     }
 
     pub fn surface_id(&self) -> ObjectId {
@@ -1030,133 +1125,163 @@ impl DockWidget {
                 item_ink
             };
 
-            // Modern 36x36 squircle app tile behind each dock icon
-            let is_item_hover = scale > 1.05;
-            let tile_hw = if is_item_hover { 19.0 } else { 17.5 };
-            let tile_bg = if item_is_light {
-                [
-                    0,
-                    0,
-                    0,
-                    if is_item_hover {
-                        28
-                    } else if item.is_focused {
-                        22
-                    } else {
-                        12
-                    },
-                ]
-            } else {
-                [
-                    255,
-                    255,
-                    255,
-                    if is_item_hover {
-                        44
-                    } else if item.is_focused {
-                        34
-                    } else {
-                        20
-                    },
-                ]
-            };
-            let tile_rim = if item_is_light {
-                [0, 0, 0, if is_item_hover { 55 } else { 28 }]
-            } else {
-                [255, 255, 255, if is_item_hover { 80 } else { 42 }]
-            };
-            UIFont::draw_rounded_rect_fill(
-                buf,
-                self.width,
-                self.height,
-                item_cx,
-                item_cy,
-                tile_hw,
-                tile_hw,
-                10.5,
-                tile_bg,
-            );
-            UIFont::draw_rounded_rect_stroke(
-                buf,
-                self.width,
-                self.height,
-                item_cx,
-                item_cy,
-                tile_hw,
-                tile_hw,
-                10.5,
-                1.0,
-                tile_rim,
-            );
-
-            match item.icon.as_str() {
-                "terminal" => UIFont::draw_terminal_icon(
-                    buf,
-                    self.width,
-                    self.height,
-                    item_cx,
-                    item_cy,
-                    icon_col,
-                ),
-                "browser" => UIFont::draw_browser_icon(
-                    buf,
-                    self.width,
-                    self.height,
-                    item_cx,
-                    item_cy,
-                    icon_col,
-                ),
-                "editor" => UIFont::draw_editor_icon(
-                    buf,
-                    self.width,
-                    self.height,
-                    item_cx,
-                    item_cy,
-                    icon_col,
-                ),
-                "folder" => UIFont::draw_folder_icon(
-                    buf,
-                    self.width,
-                    self.height,
-                    item_cx,
-                    item_cy,
-                    icon_col,
-                ),
-                "music" => UIFont::draw_music_icon(
-                    buf,
-                    self.width,
-                    self.height,
-                    item_cx,
-                    item_cy,
-                    icon_col,
-                ),
-                "check" => UIFont::draw_check_icon(
-                    buf,
-                    self.width,
-                    self.height,
-                    item_cx,
-                    item_cy,
-                    icon_col,
-                ),
-                "settings" => UIFont::draw_settings_icon(
-                    buf,
-                    self.width,
-                    self.height,
-                    item_cx,
-                    item_cy,
-                    icon_col,
-                ),
-                "sync" => {
-                    UIFont::draw_sync_icon(buf, self.width, self.height, item_cx, item_cy, icon_col)
+            if !self.icon_cache.contains_key(&item.command) {
+                if let Some(rgba) = Self::resolve_app_icon(item) {
+                    self.icon_cache.insert(item.command.clone(), rgba);
+                } else {
+                    self.icon_cache.insert(item.command.clone(), Vec::new());
                 }
-                _ => UIFont::draw_terminal_icon(
+            }
+            if let Some(rgba) = self
+                .icon_cache
+                .get(&item.command)
+                .filter(|v| v.len() == 34 * 34 * 4)
+            {
+                UIFont::draw_rounded_thumbnail(
                     buf,
                     self.width,
                     self.height,
                     item_cx,
                     item_cy,
-                    icon_col,
-                ),
+                    rgba,
+                    34,
+                    34,
+                    8.5,
+                );
+            } else {
+                // Modern 36x36 squircle app tile behind vector fallback icon
+                let is_item_hover = scale > 1.05;
+                let tile_hw = if is_item_hover { 19.0 } else { 17.5 };
+                let tile_bg = if item_is_light {
+                    [
+                        0,
+                        0,
+                        0,
+                        if is_item_hover {
+                            28
+                        } else if item.is_focused {
+                            22
+                        } else {
+                            12
+                        },
+                    ]
+                } else {
+                    [
+                        255,
+                        255,
+                        255,
+                        if is_item_hover {
+                            44
+                        } else if item.is_focused {
+                            34
+                        } else {
+                            20
+                        },
+                    ]
+                };
+                let tile_rim = if item_is_light {
+                    [0, 0, 0, if is_item_hover { 55 } else { 28 }]
+                } else {
+                    [255, 255, 255, if is_item_hover { 80 } else { 42 }]
+                };
+                UIFont::draw_rounded_rect_fill(
+                    buf,
+                    self.width,
+                    self.height,
+                    item_cx,
+                    item_cy,
+                    tile_hw,
+                    tile_hw,
+                    10.5,
+                    tile_bg,
+                );
+                UIFont::draw_rounded_rect_stroke(
+                    buf,
+                    self.width,
+                    self.height,
+                    item_cx,
+                    item_cy,
+                    tile_hw,
+                    tile_hw,
+                    10.5,
+                    1.0,
+                    tile_rim,
+                );
+
+                match item.icon.as_str() {
+                    "terminal" => UIFont::draw_terminal_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        item_cx,
+                        item_cy,
+                        icon_col,
+                    ),
+                    "browser" => UIFont::draw_browser_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        item_cx,
+                        item_cy,
+                        icon_col,
+                    ),
+                    "editor" => UIFont::draw_editor_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        item_cx,
+                        item_cy,
+                        icon_col,
+                    ),
+                    "folder" => UIFont::draw_folder_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        item_cx,
+                        item_cy,
+                        icon_col,
+                    ),
+                    "music" => UIFont::draw_music_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        item_cx,
+                        item_cy,
+                        icon_col,
+                    ),
+                    "check" => UIFont::draw_check_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        item_cx,
+                        item_cy,
+                        icon_col,
+                    ),
+                    "settings" => UIFont::draw_settings_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        item_cx,
+                        item_cy,
+                        icon_col,
+                    ),
+                    "sync" => UIFont::draw_sync_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        item_cx,
+                        item_cy,
+                        icon_col,
+                    ),
+                    _ => UIFont::draw_terminal_icon(
+                        buf,
+                        self.width,
+                        self.height,
+                        item_cx,
+                        item_cy,
+                        icon_col,
+                    ),
+                }
             }
 
             // Running status dot / pill
