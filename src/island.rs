@@ -2965,7 +2965,7 @@ impl IslandWidget {
         };
 
         let cache_valid = if let Some(ref c) = *lock {
-            c.last_check.elapsed() < Duration::from_secs(10)
+            c.last_check.elapsed() < Duration::from_millis(120)
         } else {
             false
         };
