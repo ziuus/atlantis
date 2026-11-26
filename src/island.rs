@@ -3037,14 +3037,15 @@ impl IslandWidget {
 
         let is_light = self.effective_is_light();
         let col_ink = if is_light {
-            [8, 12, 20, 255]
+            if self.pure_bw { [0, 0, 0, 255] } else { [8, 12, 20, 255] }
         } else {
-            Tokens::TEXT_PRIMARY
+            if self.pure_bw { [255, 255, 255, 255] } else { Tokens::TEXT_PRIMARY }
         };
         let col_dim = if is_light {
-            [18, 24, 34, 255]
+            if self.pure_bw { [0, 0, 0, 255] } else { [18, 24, 34, 255] }
         } else {
-            [235, 240, 252, 255]
+            let ac = self.accent_color;
+            if self.pure_bw { [ac[0], ac[1], ac[2], 255] } else { [235, 240, 252, 255] }
         };
         let col_shadow = [0, 0, 0, 0];
 

@@ -1298,19 +1298,20 @@ impl TodoWidget {
         // Apple macOS Typography & Contrast
         let (col_primary, col_secondary, col_dimmed, _col_accent, col_shadow) = if is_light {
             (
-                [8, 12, 20, 255],  // Primary text: Deep Obsidian Ink (> 15:1)
-                [18, 24, 34, 255], // Secondary text: Refined Near-Black Slate
-                [28, 36, 50, 255], // Tertiary/Dimmed: Dark Slate
-                [8, 12, 18, 255],  // Accent text
-                [0, 0, 0, 0],      // Zero shadow in light mode to prevent bleaching
+                if self.pure_bw { [0, 0, 0, 255] } else { [8, 12, 20, 255] },
+                if self.pure_bw { [0, 0, 0, 255] } else { [18, 24, 34, 255] },
+                [28, 36, 50, 255],
+                [8, 12, 18, 255],
+                [0, 0, 0, 0],
             )
         } else {
+            let ac = self.accent_color;
             (
-                Tokens::TEXT_PRIMARY,   // Primary text: Crisp Pure White
-                Tokens::TEXT_SECONDARY, // Secondary text: Soft White
-                Tokens::TEXT_TERTIARY,  // Tertiary/Dimmed: Dimmed White
-                Tokens::TEXT_PRIMARY,   // White accent
-                Tokens::TEXT_SHADOW,    // Downward soft drop shadow (0, +1)
+                if self.pure_bw { [255, 255, 255, 255] } else { Tokens::TEXT_PRIMARY },
+                if self.pure_bw { [ac[0], ac[1], ac[2], 255] } else { Tokens::TEXT_SECONDARY },
+                Tokens::TEXT_TERTIARY,
+                Tokens::TEXT_PRIMARY,
+                Tokens::TEXT_SHADOW,
             )
         };
 
